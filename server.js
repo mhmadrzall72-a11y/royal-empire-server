@@ -1,8 +1,8 @@
-
 const express = require("express");
 const cors = require("cors");
 const admin = require("firebase-admin");
 const path = require("path");
+const crypto = require("crypto");
 
 const app = express();
 
@@ -99,10 +99,27 @@ function cleanDocument(doc) {
 
 function errorResponse(res, error, fallback) {
   console.error(fallback, error);
-  return res.status(400).json({
+
+  const message = error.message || fallback;
+  const duplicate = message === "Rekening sudah terdaftar.";
+
+  return res.status(duplicate ? 409 : 400).json({
     success: false,
-    message: error.message || fallback
+    message
   });
+}
+
+// Normalisasi nomor rekening: hanya angka, tanpa spasi atau tanda baca.
+function normalizeAccountNumber(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+// ID dokumen index dibuat dari hash agar nomor rekening tidak tampil
+// sebagai ID dokumen Firestore.
+function accountNumberKey(number) {
+  return crypto.createHash("sha256")
+    .update(number)
+    .digest("hex");
 }
 
 // ===============================
@@ -357,6 +374,7 @@ app.post("/api/accounts", verifyUser, async (req, res) => {
     const bank = String(req.body.bank || "").trim();
     const accountName = String(req.body.accountName || "").trim();
     const accountNumber = String(req.body.accountNumber || "").trim();
+    const normalizedNumber = normalizeAccountNumber(accountNumber);
 
     if (!bank || !accountName || !accountNumber) {
       return res.status(400).json({
@@ -365,32 +383,74 @@ app.post("/api/accounts", verifyUser, async (req, res) => {
       });
     }
 
-    if (accountNumber.length < 5 || accountNumber.length > 30) {
+    if (
+      normalizedNumber.length < 5 ||
+      normalizedNumber.length > 30
+    ) {
       return res.status(400).json({
         success: false,
         message: "Nomor rekening tidak valid"
       });
     }
 
-    const ref = await db.collection("payout_accounts").add({
-      uid: req.user.uid,
-      bank,
-      accountName,
-      accountNumber,
-      createdAt: FieldValue.serverTimestamp()
+    const accountsRef = db.collection("payout_accounts");
+    const indexRef = db.collection("payout_account_number_index")
+      .doc(accountNumberKey(normalizedNumber));
+
+    // Pemeriksaan data lama untuk rekening yang tersimpan sebelum
+    // sistem index duplikat ini dipasang.
+    const existingAccounts = await accountsRef.get();
+
+    const duplicateLegacy = existingAccounts.docs.some(doc => {
+      const data = doc.data();
+      const existingNumber = normalizeAccountNumber(
+        data.accountNumberNormalized || data.accountNumber || ""
+      );
+
+      return existingNumber === normalizedNumber;
+    });
+
+    if (duplicateLegacy) {
+      return res.status(409).json({
+        success: false,
+        message: "Rekening sudah terdaftar."
+      });
+    }
+
+    const accountRef = accountsRef.doc();
+
+    // Transaksi memastikan dua permintaan bersamaan tidak bisa
+    // menyimpan nomor rekening yang sama.
+    await db.runTransaction(async transaction => {
+      const indexSnapshot = await transaction.get(indexRef);
+
+      if (indexSnapshot.exists) {
+        throw new Error("Rekening sudah terdaftar.");
+      }
+
+      transaction.create(indexRef, {
+        uid: req.user.uid,
+        accountId: accountRef.id,
+        createdAt: FieldValue.serverTimestamp()
+      });
+
+      transaction.create(accountRef, {
+        uid: req.user.uid,
+        bank,
+        accountName,
+        accountNumber,
+        accountNumberNormalized: normalizedNumber,
+        createdAt: FieldValue.serverTimestamp()
+      });
     });
 
     res.json({
       success: true,
       message: "Rekening berhasil disimpan",
-      accountId: ref.id
+      accountId: accountRef.id
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      success: false,
-      message: "Gagal menyimpan rekening"
-    });
+    errorResponse(res, error, "Gagal menyimpan rekening");
   }
 });
 

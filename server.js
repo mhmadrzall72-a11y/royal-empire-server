@@ -32,27 +32,28 @@ const PORT = process.env.PORT || 8000;
 const FieldValue = admin.firestore.FieldValue;
 const Timestamp = admin.firestore.Timestamp;
 
-// Katalog paket layanan. Tidak menjanjikan keuntungan atau pengembalian dana.
+// Katalog paket. Nilai keuntungan dan total bersih dikirim sebagai angka.
+// Nilai yang ditampilkan adalah estimasi dan bukan jaminan hasil.
 const PACKAGES = {
   paket_1_hari: {
     id: "paket_1_hari", name: "Paket 1 Hari", price: 75000,
-    durationDays: 1, profitPercent: 0, profitAmount: 0,
-    totalReturn: 0, description: "Akses layanan selama 1 hari."
+    durationDays: 1, profitPercent: 30.6667, profitAmount: 23000,
+    totalReturn: 98000, description: "Estimasi nilai akhir paket 1 hari."
   },
   paket_5_hari: {
     id: "paket_5_hari", name: "Paket 5 Hari", price: 250000,
-    durationDays: 5, profitPercent: 0, profitAmount: 0,
-    totalReturn: 0, description: "Akses layanan selama 5 hari."
+    durationDays: 5, profitPercent: 60, profitAmount: 150000,
+    totalReturn: 400000, description: "Estimasi nilai akhir paket 5 hari."
   },
   royal: {
     id: "royal", name: "Royal", price: 800000,
-    durationDays: 15, profitPercent: 0, profitAmount: 0,
-    totalReturn: 0, description: "Akses layanan Royal selama 15 hari."
+    durationDays: 15, profitPercent: 80, profitAmount: 640000,
+    totalReturn: 1440000, description: "Estimasi nilai akhir paket Royal."
   },
   emperor: {
     id: "emperor", name: "Emperor", price: 1500000,
-    durationDays: 30, profitPercent: 0, profitAmount: 0,
-    totalReturn: 0, description: "Akses layanan Emperor selama 30 hari."
+    durationDays: 30, profitPercent: 95, profitAmount: 1425000,
+    totalReturn: 2925000, description: "Estimasi nilai akhir paket Emperor."
   }
 };
 
@@ -68,7 +69,9 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// ===============================
 // AUTENTIKASI DAN HAK AKSES
+// ===============================
 
 async function verifyUser(req, res, next) {
   try {
@@ -128,17 +131,21 @@ function errorResponse(res, error, fallback) {
   });
 }
 
+// Normalisasi nomor agar 0812-3456 sama dengan 08123456.
 function normalizeAccountNumber(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
+// ID indeks tidak menyimpan nomor rekening secara langsung.
 function accountIndexId(number) {
   return crypto.createHash("sha256")
     .update(number)
     .digest("hex");
 }
 
+// ===============================
 // PROFIL DAN SALDO PENGGUNA
+// ===============================
 
 app.get("/api/profile", verifyUser, async (req, res) => {
   try {
@@ -198,7 +205,9 @@ app.get("/api/wallet", verifyUser, async (req, res) => {
   }
 });
 
+// ===============================
 // DEPOSIT PENGGUNA
+// ===============================
 
 app.post("/api/deposits", verifyUser, async (req, res) => {
   try {
@@ -261,7 +270,9 @@ app.get("/api/deposits", verifyUser, async (req, res) => {
   }
 });
 
+// ===============================
 // PENARIKAN PENGGUNA
+// ===============================
 
 app.post("/api/withdrawals", verifyUser, async (req, res) => {
   try {
@@ -355,7 +366,6 @@ app.get("/api/withdrawals", verifyUser, async (req, res) => {
     });
   }
 });
-
 // ===============================
 // REKENING PENCAIRAN
 // ===============================
@@ -405,6 +415,7 @@ app.post("/api/accounts", verifyUser, async (req, res) => {
     const indexRef = db.collection("payout_account_numbers")
       .doc(accountIndexId(normalized));
 
+    // Periksa rekening lama milik pengguna, termasuk data sebelum fitur indeks.
     const oldAccounts = await accountsRef
       .where("uid", "==", req.user.uid)
       .get();
@@ -547,13 +558,17 @@ app.delete("/api/accounts/:id", verifyUser, async (req, res) => {
 });
 
 // ===============================
-// KATALOG DAN LANGGANAN PAKET LAYANAN
+// PAKET INVESTASI
 // ===============================
 
 app.get("/api/packages", verifyUser, (req, res) => {
   res.json({
     success: true,
-    packages: Object.values(PACKAGES)
+    packages: Object.values(PACKAGES).map(p => ({
+      ...p,
+      profitAmount: Number(p.profitAmount),
+      totalReturn: Number(p.totalReturn)
+    }))
   });
 });
 
@@ -564,9 +579,30 @@ app.get("/api/packages/mine", verifyUser, async (req, res) => {
       .limit(100)
       .get();
 
+    const packages = snap.docs.map(doc => {
+      const purchase = cleanDocument(doc);
+      const config = PACKAGES[purchase.packageId] || {};
+
+      const profitAmount =
+        Number(purchase.profitAmount) ||
+        Number(config.profitAmount) ||
+        0;
+
+      const totalReturn =
+        Number(purchase.totalReturn) ||
+        Number(config.totalReturn) ||
+        (Number(purchase.purchaseAmount || 0) + profitAmount);
+
+      return {
+        ...purchase,
+        profitAmount,
+        totalReturn
+      };
+    });
+
     res.json({
       success: true,
-      packages: snap.docs.map(cleanDocument)
+      packages
     });
   } catch (error) {
     console.error(error);
@@ -577,8 +613,6 @@ app.get("/api/packages/mine", verifyUser, async (req, res) => {
   }
 });
 
-// Pembelian paket hanya mencatat pembelian akses layanan.
-// Tidak ada kredit keuntungan atau pengembalian dana otomatis.
 app.post("/api/packages/purchase", verifyUser, async (req, res) => {
   try {
     const selected = PACKAGES[String(req.body.packageId || "")];
@@ -594,13 +628,16 @@ app.post("/api/packages/purchase", verifyUser, async (req, res) => {
     const purchaseRef = db.collection("package_purchases").doc();
     const ledgerRef = db.collection("wallet_ledger").doc();
 
-    await db.runTransaction(async tx => {
-      const wallet = await tx.get(walletRef);
+    await db.runTransaction(async transaction => {
+      const wallet = await transaction.get(walletRef);
       const balance = wallet.exists
         ? Number(wallet.data().balance || 0)
         : 0;
 
-      if (!Number.isSafeInteger(balance) || balance < selected.price) {
+      if (
+        !Number.isSafeInteger(balance) ||
+        balance < selected.price
+      ) {
         throw new Error("Saldo tidak mencukupi untuk membeli paket.");
       }
 
@@ -609,24 +646,27 @@ app.post("/api/packages/purchase", verifyUser, async (req, res) => {
         now.getTime() + selected.durationDays * 86400000
       );
 
-      tx.set(walletRef, {
+      transaction.set(walletRef, {
         balance: balance - selected.price,
         updatedAt: FieldValue.serverTimestamp()
       }, { merge: true });
 
-      tx.set(purchaseRef, {
+      transaction.set(purchaseRef, {
         uid: req.user.uid,
         packageId: selected.id,
         packageName: selected.name,
         purchaseAmount: selected.price,
         durationDays: selected.durationDays,
+        profitPercent: Number(selected.profitPercent),
+        profitAmount: Number(selected.profitAmount),
+        totalReturn: Number(selected.totalReturn),
         status: "active",
         purchasedAt: Timestamp.fromDate(now),
         maturityAt: Timestamp.fromDate(maturity),
         createdAt: FieldValue.serverTimestamp()
       });
 
-      tx.set(ledgerRef, {
+      transaction.set(ledgerRef, {
         uid: req.user.uid,
         type: "package_purchase",
         amount: -selected.price,
@@ -637,7 +677,7 @@ app.post("/api/packages/purchase", verifyUser, async (req, res) => {
 
     res.json({
       success: true,
-      message: "Paket layanan berhasil dibeli dan masa akses sudah dimulai.",
+      message: "Paket berhasil dibeli dan masa paket sudah dimulai.",
       purchaseId: purchaseRef.id
     });
   } catch (error) {
@@ -771,7 +811,7 @@ app.post("/api/admin/deposits/:id/approve",
         }
 
         const data = deposit.data();
-                const amount = Number(data.amount);
+        const amount = Number(data.amount);
 
         if (!Number.isSafeInteger(amount) || amount < 10000) {
           throw new Error("Nominal deposit tidak valid");
@@ -813,7 +853,6 @@ app.post("/api/admin/deposits/:id/approve",
     }
   }
 );
-
 // ===============================
 // ADMIN: TOLAK DEPOSIT
 // ===============================
@@ -1016,8 +1055,7 @@ app.post("/api/admin/withdrawals/:id/reject",
 );
 
 // ===============================
-// ADMIN: PAKET LAYANAN YANG SUDAH BERAKHIR
-// Tidak ada pencairan hasil atau kredit keuntungan otomatis.
+// ADMIN: PAKET JATUH TEMPO DAN KREDIT HASIL
 // ===============================
 
 app.get("/api/admin/packages/due",
@@ -1046,12 +1084,15 @@ app.get("/api/admin/packages/due",
         };
       }));
 
-      res.json({ success: true, packages });
+      res.json({
+        success: true,
+        packages
+      });
     } catch (error) {
       console.error(error);
       res.status(500).json({
         success: false,
-        message: "Gagal mengambil paket yang berakhir."
+        message: "Gagal mengambil paket jatuh tempo."
       });
     }
   }
@@ -1063,36 +1104,68 @@ app.post("/api/admin/packages/:id/settle",
       const purchaseRef = db.collection("package_purchases")
         .doc(req.params.id);
 
-      await db.runTransaction(async tx => {
-        const purchase = await tx.get(purchaseRef);
+      const ledgerRef = db.collection("wallet_ledger").doc();
 
-        if (!purchase.exists || purchase.data().status !== "active") {
+      await db.runTransaction(async transaction => {
+        const purchase = await transaction.get(purchaseRef);
+
+        if (
+          !purchase.exists ||
+          purchase.data().status !== "active"
+        ) {
           throw new Error("Paket tidak tersedia atau sudah diproses.");
         }
 
-        const maturity = purchase.data().maturityAt;
+        const data = purchase.data();
+        const maturity = data.maturityAt;
 
         if (
           !maturity ||
           typeof maturity.toMillis !== "function" ||
           maturity.toMillis() > Date.now()
         ) {
-          throw new Error("Masa akses paket belum berakhir.");
+          throw new Error("Paket belum jatuh tempo.");
         }
 
-        tx.update(purchaseRef, {
-          status: "expired",
-          expiredAt: FieldValue.serverTimestamp(),
-          reviewedBy: req.user.uid
+        const amount = Number(data.totalReturn);
+
+        if (!Number.isSafeInteger(amount) || amount <= 0) {
+          throw new Error("Nilai hasil paket tidak valid.");
+        }
+
+        const walletRef = db.collection("wallets").doc(data.uid);
+        const wallet = await transaction.get(walletRef);
+
+        const balance = wallet.exists
+          ? Number(wallet.data().balance || 0)
+          : 0;
+
+        transaction.set(walletRef, {
+          balance: balance + amount,
+          updatedAt: FieldValue.serverTimestamp()
+        }, { merge: true });
+
+        transaction.update(purchaseRef, {
+          status: "settled",
+          settledAt: FieldValue.serverTimestamp(),
+          settledBy: req.user.uid
+        });
+
+        transaction.set(ledgerRef, {
+          uid: data.uid,
+          type: "package_maturity",
+          amount,
+          referenceId: purchaseRef.id,
+          createdAt: FieldValue.serverTimestamp()
         });
       });
 
       res.json({
         success: true,
-        message: "Masa akses paket ditandai berakhir. Tidak ada keuntungan yang dikreditkan."
+        message: "Hasil paket dikreditkan ke saldo pengguna."
       });
     } catch (error) {
-      errorResponse(res, error, "Gagal memperbarui status paket");
+      errorResponse(res, error, "Gagal mengkreditkan hasil paket");
     }
   }
 );

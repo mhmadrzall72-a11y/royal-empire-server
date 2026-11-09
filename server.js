@@ -105,12 +105,12 @@ function errorResponse(res, error, fallback) {
   });
 }
 
-// Normalisasi nomor agar 0812-3456 sama dengan 08123456.
+// Normalisasi nomor rekening.
 function normalizeAccountNumber(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
-// ID indeks tidak menyimpan nomor rekening secara langsung.
+// ID indeks rekening.
 function accountIndexId(number) {
   return crypto.createHash("sha256")
     .update(number)
@@ -390,7 +390,6 @@ app.post("/api/accounts", verifyUser, async (req, res) => {
     const indexRef = db.collection("payout_account_numbers")
       .doc(accountIndexId(normalized));
 
-    // Periksa rekening lama milik pengguna, termasuk data sebelum fitur indeks.
     const oldAccounts = await accountsRef
       .where("uid", "==", req.user.uid)
       .get();
@@ -455,7 +454,7 @@ app.post("/api/accounts", verifyUser, async (req, res) => {
   }
 });
 
-// Hapus rekening milik pengguna yang sedang login.
+// Hapus rekening milik pengguna yang login.
 app.delete("/api/accounts/:id", verifyUser, async (req, res) => {
   try {
     const accountId = String(req.params.id || "").trim();

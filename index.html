@@ -1,0 +1,621 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#10091d">
+<title>ROYAL EMPIRE</title>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+
+<style>
+:root {
+  --bg:#10091d;
+  --panel:#1d1230;
+  --panel2:#28183d;
+  --gold:#d8b46a;
+  --gold2:#f5d998;
+  --text:#f7f1ff;
+  --muted:#a99bb8;
+  --border:#3a2850;
+  --red:#e87979;
+  --green:#6bd5a0;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--text);
+  font-family:Arial,sans-serif;min-height:100vh;
+}
+button,input,select{font:inherit}
+button{cursor:pointer}
+.hidden{display:none!important}
+.auth-wrap{
+  min-height:100vh;display:flex;align-items:center;
+  justify-content:center;padding:22px;
+  background:radial-gradient(ellipse at top,#38204f 0%,#10091d 65%);
+}
+.auth-card{
+  width:100%;max-width:410px;background:var(--panel);
+  border:1px solid var(--border);border-radius:20px;
+  padding:28px;box-shadow:0 20px 70px #0008;
+}
+.logo{
+  text-align:center;color:var(--gold2);
+  font-size:27px;font-weight:900;letter-spacing:3px;
+}
+.subtitle{text-align:center;color:var(--muted);font-size:12px;margin:9px 0 26px}
+.field{margin:14px 0}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:7px}
+.field input,.field select{
+  width:100%;padding:14px;background:#120b1e;
+  border:1px solid var(--border);border-radius:10px;
+  color:white;outline:none;
+}
+.field input:focus,.field select:focus{border-color:var(--gold)}
+.btn{
+  width:100%;border:0;border-radius:10px;padding:14px;
+  font-weight:bold;background:linear-gradient(120deg,var(--gold),var(--gold2));
+  color:#21142c;margin-top:10px;
+}
+.btn.secondary{background:var(--panel2);color:var(--gold2);border:1px solid var(--border)}
+.btn.danger{background:#54242e;color:white}
+.auth-links{text-align:center;margin-top:18px;color:var(--muted);font-size:13px}
+.auth-links a{color:var(--gold2);cursor:pointer}
+#app{min-height:100vh;padding-bottom:85px}
+.topbar{
+  padding:18px 20px;background:#170e25;
+  border-bottom:1px solid var(--border);
+  display:flex;justify-content:space-between;align-items:center;
+  position:sticky;top:0;z-index:5;
+}
+.brand{font-weight:900;letter-spacing:2px;color:var(--gold2)}
+.user-small{font-size:11px;color:var(--muted);max-width:150px;overflow:hidden}
+.container{max-width:850px;margin:auto;padding:20px}
+.welcome{font-size:22px;font-weight:bold;margin:8px 0}
+.muted{color:var(--muted);font-size:13px}
+.balance{
+  margin-top:20px;padding:24px;border-radius:17px;
+  background:linear-gradient(130deg,#38234d,#211432);
+  border:1px solid #765633;
+}
+.balance small{color:var(--gold2)}
+.balance h1{font-size:30px;margin:12px 0}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:17px}
+.stat,.panel{
+  background:var(--panel);border:1px solid var(--border);
+  border-radius:14px;padding:17px;
+}
+.stat b{display:block;color:var(--gold2);font-size:17px;margin-top:8px}
+.section-title{font-size:17px;font-weight:bold;margin:27px 0 13px}
+.panel{margin-bottom:14px}
+.panel h3{margin:0 0 12px;color:var(--gold2);font-size:15px}
+.nav{
+  position:fixed;bottom:0;left:0;right:0;z-index:10;
+  display:flex;justify-content:space-around;
+  background:#190f27;border-top:1px solid var(--border);
+  padding:10px 4px calc(10px + env(safe-area-inset-bottom));
+}
+.nav button{
+  background:none;border:0;color:var(--muted);
+  font-size:10px;padding:5px;min-width:55px;
+}
+.nav button.active{color:var(--gold2)}
+.nav span{display:block;font-size:19px;margin-bottom:4px}
+.page{display:none}
+.page.active{display:block}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.item{
+  padding:13px 0;border-bottom:1px solid var(--border);
+  font-size:13px;
+}
+.item:last-child{border:0}
+.status{font-size:11px;color:var(--gold2)}
+.notice{
+  padding:12px;border-radius:10px;background:#2b2036;
+  color:#dfd2ec;font-size:12px;line-height:1.6;margin:14px 0;
+}
+.toast{
+  position:fixed;top:20px;left:50%;transform:translateX(-50%);
+  background:#30213d;border:1px solid var(--gold);
+  padding:13px 18px;border-radius:10px;z-index:100;
+  width:max-content;max-width:90%;font-size:13px;
+}
+@media(max-width:480px){
+  .container{padding:15px}
+  .grid{gap:9px}
+  .stat{padding:13px}
+}
+</style>
+</head>
+
+<body>
+
+<div id="toast" class="toast hidden"></div>
+
+<!-- LOGIN -->
+<section id="authScreen" class="auth-wrap">
+  <div class="auth-card">
+    <div class="logo">ROYAL EMPIRE</div>
+    <div class="subtitle">PLATFORM LAYANAN DAN TRANSAKSI</div>
+
+    <div id="loginForm">
+      <div class="field">
+        <label>Email</label>
+        <input id="loginEmail" type="email" placeholder="Masukkan email">
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input id="loginPassword" type="password" placeholder="Masukkan password">
+      </div>
+      <button class="btn" onclick="login()">MASUK</button>
+      <div class="auth-links">
+        Belum punya akun? <a onclick="showAuth('registerForm')">Daftar</a>
+        <br><br>
+        <a onclick="showAuth('forgotForm')">Lupa password?</a>
+      </div>
+    </div>
+
+    <div id="registerForm" class="hidden">
+      <div class="field">
+        <label>Nama lengkap</label>
+        <input id="regName" placeholder="Nama lengkap">
+      </div>
+      <div class="field">
+        <label>Email</label>
+        <input id="regEmail" type="email" placeholder="Email aktif">
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input id="regPassword" type="password" placeholder="Minimal 6 karakter">
+      </div>
+      <button class="btn" onclick="register()">BUAT AKUN</button>
+      <div class="auth-links">
+        Sudah punya akun? <a onclick="showAuth('loginForm')">Masuk</a>
+      </div>
+    </div>
+
+    <div id="forgotForm" class="hidden">
+      <div class="field">
+        <label>Email akun</label>
+        <input id="forgotEmail" type="email" placeholder="Masukkan email">
+      </div>
+      <button class="btn" onclick="forgotPassword()">KIRIM LINK RESET</button>
+      <div class="auth-links">
+        <a onclick="showAuth('loginForm')">Kembali ke login</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- APPLICATION -->
+<div id="app" class="hidden">
+  <header class="topbar">
+    <div class="brand">ROYAL EMPIRE</div>
+    <div class="user-small" id="userEmail"></div>
+  </header>
+
+  <main class="container">
+
+    <!-- HOME -->
+    <section id="homePage" class="page active">
+      <div class="welcome">Selamat datang</div>
+      <div class="muted" id="welcomeName">Akun ROYAL EMPIRE</div>
+
+      <div class="balance">
+        <small>SALDO TERCATAT</small>
+        <h1 id="balanceValue">Rp 0</h1>
+        <div class="muted">Saldo akan ditampilkan setelah koneksi backend aktif.</div>
+      </div>
+
+      <div class="grid">
+        <div class="stat">
+          <span class="muted">Deposit</span>
+          <b>Transaksi masuk</b>
+        </div>
+        <div class="stat">
+          <span class="muted">Penarikan</span>
+          <b>Transaksi keluar</b>
+        </div>
+      </div>
+
+      <div class="section-title">Informasi akun</div>
+      <div class="panel">
+        <div class="row">
+          <span class="muted">Email</span>
+          <span id="profileEmail">-</span>
+        </div>
+        <div class="item row">
+          <span class="muted">Status login</span>
+          <span class="status">Aktif</span>
+        </div>
+      </div>
+
+      <div class="notice">
+        Setiap transaksi harus melalui verifikasi. Jangan melakukan pembayaran
+        ke rekening yang tidak tercantum pada instruksi pembayaran resmi.
+      </div>
+    </section>
+
+    <!-- DEPOSIT -->
+    <section id="depositPage" class="page">
+      <div class="section-title">Pengajuan Deposit</div>
+      <div class="panel">
+        <h3>Isi permintaan deposit</h3>
+        <div class="field">
+          <label>Nominal (Rupiah)</label>
+          <input id="depositAmount" type="number" min="10000" placeholder="Contoh: 50000">
+        </div>
+        <div class="field">
+          <label>Metode pembayaran</label>
+          <select id="depositMethod">
+            <option value="bank_transfer">Transfer bank</option>
+            <option value="e_wallet">E-wallet</option>
+          </select>
+        </div>
+        <button class="btn" onclick="submitDeposit()">KIRIM PERMINTAAN</button>
+        <div class="notice">
+          Pengajuan ini belum merupakan pembayaran. Ikuti instruksi pembayaran
+          resmi dan tunggu verifikasi sebelum saldo diperbarui.
+        </div>
+      </div>
+      <div class="section-title">Riwayat deposit</div>
+      <div class="panel" id="depositHistory">Belum ada data.</div>
+    </section>
+
+    <!-- WITHDRAW -->
+    <section id="withdrawPage" class="page">
+      <div class="section-title">Penarikan Dana</div>
+      <div class="panel">
+        <h3>Ajukan penarikan</h3>
+        <div class="field">
+          <label>Nominal penarikan</label>
+          <input id="withdrawAmount" type="number" min="10000" placeholder="Nominal rupiah">
+        </div>
+        <div class="field">
+          <label>Rekening tujuan</label>
+          <select id="withdrawAccount">
+            <option value="">Pilih rekening tersimpan</option>
+          </select>
+        </div>
+        <button class="btn" onclick="submitWithdrawal()">AJUKAN PENARIKAN</button>
+        <div class="notice">
+          Penarikan akan diperiksa terlebih dahulu. Status pengajuan dapat
+          dilihat pada riwayat transaksi.
+        </div>
+      </div>
+    </section>
+
+    <!-- ACCOUNTS -->
+    <section id="accountPage" class="page">
+      <div class="section-title">Rekening Pencairan</div>
+      <div class="panel">
+        <h3>Tambah rekening</h3>
+        <div class="field">
+          <label>Bank / E-wallet</label>
+          <select id="accountBank">
+            <option value="">Pilih metode</option>
+            <option>BCA</option>
+            <option>BRI</option>
+            <option>BNI</option>
+            <option>Mandiri</option>
+            <option>BSI</option>
+            <option>DANA</option>
+            <option>GoPay</option>
+            <option>OVO</option>
+            <option>ShopeePay</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Nama pemilik rekening</label>
+          <input id="accountName" placeholder="Nama sesuai rekening">
+        </div>
+        <div class="field">
+          <label>Nomor rekening / nomor e-wallet</label>
+          <input id="accountNumber" placeholder="Masukkan nomor">
+        </div>
+        <button class="btn" onclick="addAccount()">SIMPAN REKENING</button>
+      </div>
+      <div class="section-title">Rekening tersimpan</div>
+      <div class="panel" id="accountList">Belum ada rekening.</div>
+    </section>
+
+    <!-- HISTORY -->
+    <section id="historyPage" class="page">
+      <div class="section-title">Riwayat Transaksi</div>
+      <div class="panel">
+        <h3>Deposit</h3>
+        <div id="historyDeposit">Belum ada data.</div>
+      </div>
+      <div class="panel">
+        <h3>Penarikan</h3>
+        <div id="historyWithdrawal">Belum ada data.</div>
+      </div>
+    </section>
+
+    <!-- PROFILE -->
+    <section id="profilePage" class="page">
+      <div class="section-title">Akun Saya</div>
+      <div class="panel">
+        <h3>Informasi pengguna</h3>
+        <div class="item row"><span class="muted">Nama</span><span id="profileName">-</span></div>
+        <div class="item row"><span class="muted">Email</span><span id="profileEmail2">-</span></div>
+      </div>
+      <div class="panel">
+        <h3>Pusat bantuan</h3>
+        <p class="muted">Untuk kendala deposit, penarikan, atau akun, hubungi layanan bantuan resmi.</p>
+        <div class="field">
+          <label>Pesan bantuan</label>
+          <input id="helpMessage" placeholder="Tuliskan kendala kamu">
+        </div>
+        <button class="btn secondary" onclick="sendHelp()">KIRIM PESAN</button>
+      </div>
+      <button class="btn danger" onclick="logout()">KELUAR</button>
+    </section>
+
+  </main>
+
+  <nav class="nav">
+    <button class="active" onclick="navigate('homePage',this)"><span>⌂</span>Home</button>
+    <button onclick="navigate('depositPage',this)"><span>＋</span>Deposit</button>
+    <button onclick="navigate('withdrawPage',this)"><span>⇧</span>Tarik</button>
+    <button onclick="navigate('historyPage',this)"><span>▤</span>Riwayat</button>
+    <button onclick="navigate('profilePage',this)"><span>♙</span>Akun</button>
+  </nav>
+</div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyDeoNxhXhHWcPLWt5EbJ0o7x_o4MMBghPY",
+  authDomain: "royal-empire-918a5.firebaseapp.com",
+  projectId: "royal-empire-918a5",
+  storageBucket: "royal-empire-918a5.firebasestorage.app",
+  messagingSenderId: "623473406377",
+  appId: "1:623473406377:web:5e76dd0746751728dcd4b8",
+  measurementId: "G-837R53TJLP"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+
+// GANTI dengan URL aplikasi Hostless milikmu.
+const API_BASE = "ISI_URL_HOSTLESS_KAMU";
+
+let currentUser = null;
+let userProfile = null;
+
+function toast(message){
+  const el=document.getElementById("toast");
+  el.textContent=message;
+  el.classList.remove("hidden");
+  setTimeout(()=>el.classList.add("hidden"),2800);
+}
+
+function showAuth(id){
+  ["loginForm","registerForm","forgotForm"].forEach(x=>
+    document.getElementById(x).classList.add("hidden")
+  );
+  document.getElementById(id).classList.remove("hidden");
+}
+
+function navigate(page,button){
+  document.querySelectorAll(".page").forEach(x=>x.classList.remove("active"));
+  document.getElementById(page).classList.add("active");
+  document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("active"));
+  if(button)button.classList.add("active");
+  if(page==="depositPage")loadDeposits();
+  if(page==="accountPage")loadAccounts();
+  if(page==="historyPage"){
+    loadDeposits();
+    loadWithdrawals();
+  }
+}
+
+async function login(){
+  const email=document.getElementById("loginEmail").value.trim();
+  const password=document.getElementById("loginPassword").value;
+  if(!email||!password)return toast("Isi email dan password.");
+  try{
+    await auth.signInWithEmailAndPassword(email,password);
+    toast("Login berhasil.");
+  }catch(e){toast(authError(e));}
+}
+
+async function register(){
+  const name=document.getElementById("regName").value.trim();
+  const email=document.getElementById("regEmail").value.trim();
+  const password=document.getElementById("regPassword").value;
+  if(!name||!email||password.length<6)
+    return toast("Lengkapi data. Password minimal 6 karakter.");
+  try{
+    const result=await auth.createUserWithEmailAndPassword(email,password);
+    await result.user.updateProfile({displayName:name});
+    toast("Pendaftaran berhasil.");
+  }catch(e){toast(authError(e));}
+}
+
+async function forgotPassword(){
+  const email=document.getElementById("forgotEmail").value.trim();
+  if(!email)return toast("Masukkan email.");
+  try{
+    await auth.sendPasswordResetEmail(email);
+    toast("Link reset password sudah dikirim.");
+  }catch(e){toast(authError(e));}
+}
+
+function authError(e){
+  const map={
+    "auth/email-already-in-use":"Email sudah terdaftar.",
+    "auth/invalid-email":"Format email tidak benar.",
+    "auth/weak-password":"Password terlalu lemah.",
+    "auth/user-not-found":"Akun tidak ditemukan.",
+    "auth/wrong-password":"Password salah.",
+    "auth/invalid-credential":"Email atau password salah.",
+    "auth/too-many-requests":"Terlalu banyak percobaan. Coba lagi nanti."
+  };
+  return map[e.code]||"Terjadi kesalahan: "+e.message;
+}
+
+async function api(path,options={}){
+  if(!currentUser)throw new Error("Silakan login kembali.");
+  if(!API_BASE.startsWith("https://") || API_BASE.includes("ISI_URL"))
+    throw new Error("URL Hostless belum dipasang pada index.html.");
+  const token=await currentUser.getIdToken();
+  const response=await fetch(API_BASE+path,{
+    ...options,
+    headers:{
+      "Content-Type":"application/json",
+      "Authorization":"Bearer "+token,
+      ...(options.headers||{})
+    }
+  });
+  const data=await response.json();
+  if(!response.ok||data.success===false)
+    throw new Error(data.message||"Permintaan gagal.");
+  return data;
+}
+
+async function loadProfile(){
+  try{
+    const data=await api("/api/profile");
+    userProfile=data.profile;
+    document.getElementById("welcomeName").textContent=
+      userProfile.fullName||currentUser.displayName||"Pengguna";
+    document.getElementById("profileName").textContent=
+      userProfile.fullName||currentUser.displayName||"-";
+    document.getElementById("profileEmail").textContent=currentUser.email||"-";
+    document.getElementById("profileEmail2").textContent=currentUser.email||"-";
+  }catch(e){toast(e.message);}
+}
+
+async function submitDeposit(){
+  const amount=Number(document.getElementById("depositAmount").value);
+  const method=document.getElementById("depositMethod").value;
+  if(!Number.isSafeInteger(amount)||amount<10000)
+    return toast("Minimal pengajuan Rp10.000.");
+  try{
+    const result=await api("/api/deposits",{
+      method:"POST",
+      body:JSON.stringify({amount,method})
+    });
+    toast(result.message||"Pengajuan berhasil.");
+    document.getElementById("depositAmount").value="";
+    loadDeposits();
+  }catch(e){toast(e.message);}
+}
+
+async function submitWithdrawal(){
+  const amount=Number(document.getElementById("withdrawAmount").value);
+  const accountId=document.getElementById("withdrawAccount").value;
+  if(!Number.isSafeInteger(amount)||amount<10000)
+    return toast("Minimal penarikan Rp10.000.");
+  if(!accountId)return toast("Pilih rekening tujuan.");
+  try{
+    const result=await api("/api/withdrawals",{
+      method:"POST",
+      body:JSON.stringify({amount,accountId})
+    });
+    toast(result.message||"Permintaan penarikan dikirim.");
+    document.getElementById("withdrawAmount").value="";
+  }catch(e){toast(e.message);}
+}
+
+async function addAccount(){
+  const bank=document.getElementById("accountBank").value;
+  const accountName=document.getElementById("accountName").value.trim();
+  const accountNumber=document.getElementById("accountNumber").value.trim();
+  if(!bank||!accountName||!accountNumber)
+    return toast("Lengkapi semua data rekening.");
+  try{
+    await api("/api/accounts",{
+      method:"POST",
+      body:JSON.stringify({bank,accountName,accountNumber})
+    });
+    toast("Rekening berhasil disimpan.");
+    document.getElementById("accountName").value="";
+    document.getElementById("accountNumber").value="";
+    loadAccounts();
+  }catch(e){toast(e.message);}
+}
+
+async function loadAccounts(){
+  try{
+    const data=await api("/api/accounts");
+    const list=document.getElementById("accountList");
+    const select=document.getElementById("withdrawAccount");
+    list.innerHTML="";
+    select.innerHTML='<option value="">Pilih rekening tersimpan</option>';
+    if(!data.accounts.length)list.textContent="Belum ada rekening.";
+    data.accounts.forEach(a=>{
+      const item=document.createElement("div");
+      item.className="item";
+      item.textContent=a.bank+" — "+a.accountName+" — "+a.accountNumber;
+      list.appendChild(item);
+      const option=document.createElement("option");
+      option.value=a.id;
+      option.textContent=a.bank+" — "+a.accountNumber;
+      select.appendChild(option);
+    });
+  }catch(e){toast(e.message);}
+}
+
+function renderTransactions(target,items){
+  const el=document.getElementById(target);
+  el.innerHTML="";
+  if(!items.length){el.textContent="Belum ada transaksi.";return;}
+  items.forEach(item=>{
+    const row=document.createElement("div");
+    row.className="item";
+    const title=document.createElement("b");
+    title.textContent="Rp "+Number(item.amount||0).toLocaleString("id-ID");
+    const status=document.createElement("div");
+    status.className="status";
+    status.textContent="Status: "+(item.status||"pending");
+    row.append(title,status);
+    el.appendChild(row);
+  });
+}
+
+async function loadDeposits(){
+  try{
+    const data=await api("/api/deposits");
+    renderTransactions("depositHistory",data.deposits||[]);
+    renderTransactions("historyDeposit",data.deposits||[]);
+  }catch(e){toast(e.message);}
+}
+
+async function loadWithdrawals(){
+  try{
+    const data=await api("/api/withdrawals");
+    renderTransactions("historyWithdrawal",data.withdrawals||[]);
+  }catch(e){toast(e.message);}
+}
+
+function sendHelp(){
+  const message=document.getElementById("helpMessage").value.trim();
+  if(!message)return toast("Tuliskan pesan bantuan.");
+  toast("Pusat bantuan belum tersambung ke server.");
+}
+
+async function logout(){
+  await auth.signOut();
+  toast("Kamu sudah keluar.");
+}
+
+auth.onAuthStateChanged(async user=>{
+  currentUser=user;
+  if(user){
+    document.getElementById("authScreen").classList.add("hidden");
+    document.getElementById("app").classList.remove("hidden");
+    document.getElementById("userEmail").textContent=user.email||"";
+    await loadProfile();
+  }else{
+    document.getElementById("app").classList.add("hidden");
+    document.getElementById("authScreen").classList.remove("hidden");
+    showAuth("loginForm");
+  }
+});
+</script>
+</body>
+</html>

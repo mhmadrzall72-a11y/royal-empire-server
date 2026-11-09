@@ -13,17 +13,11 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: "1mb" }));
-
-// Sajikan file frontend
 app.use(express.static(__dirname));
 
-// FIREBASE ADMIN
 if (!admin.apps.length) {
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    const serviceAccount = JSON.parse(
-      process.env.FIREBASE_SERVICE_ACCOUNT
-    );
-
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount)
     });
@@ -37,12 +31,10 @@ const auth = admin.auth();
 const PORT = process.env.PORT || 8000;
 const FieldValue = admin.firestore.FieldValue;
 
-// HALAMAN UTAMA
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
 
-// HEALTH CHECK
 app.get("/api/health", (req, res) => {
   res.json({
     success: true,
@@ -51,7 +43,10 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// VERIFIKASI LOGIN
+// ===============================
+// AUTENTIKASI DAN HAK AKSES
+// ===============================
+
 async function verifyUser(req, res, next) {
   try {
     const header = req.headers.authorization || "";
@@ -73,7 +68,6 @@ async function verifyUser(req, res, next) {
   }
 }
 
-// VERIFIKASI ADMIN
 async function verifyAdmin(req, res, next) {
   try {
     const userDoc = await db.collection("users")
@@ -96,7 +90,6 @@ async function verifyAdmin(req, res, next) {
   }
 }
 
-// FORMAT DOKUMEN
 function cleanDocument(doc) {
   return {
     id: doc.id,
@@ -104,7 +97,18 @@ function cleanDocument(doc) {
   };
 }
 
-// PROFIL PENGGUNA
+function errorResponse(res, error, fallback) {
+  console.error(fallback, error);
+  return res.status(400).json({
+    success: false,
+    message: error.message || fallback
+  });
+}
+
+// ===============================
+// PROFIL DAN SALDO PENGGUNA
+// ===============================
+
 app.get("/api/profile", verifyUser, async (req, res) => {
   try {
     const ref = db.collection("users").doc(req.user.uid);
@@ -134,6 +138,7 @@ app.get("/api/profile", verifyUser, async (req, res) => {
       }
     });
   } catch (error) {
+    console.error(error);
     res.status(500).json({
       success: false,
       message: "Gagal mengambil profil"
@@ -141,7 +146,6 @@ app.get("/api/profile", verifyUser, async (req, res) => {
   }
 });
 
-// SALDO PENGGUNA
 app.get("/api/wallet", verifyUser, async (req, res) => {
   try {
     const wallet = await db.collection("wallets")
@@ -155,6 +159,7 @@ app.get("/api/wallet", verifyUser, async (req, res) => {
         : 0
     });
   } catch (error) {
+    console.error(error);
     res.status(500).json({
       success: false,
       message: "Gagal mengambil saldo"
@@ -162,7 +167,10 @@ app.get("/api/wallet", verifyUser, async (req, res) => {
   }
 });
 
-// AJUKAN DEPOSIT
+// ===============================
+// DEPOSIT PENGGUNA
+// ===============================
+
 app.post("/api/deposits", verifyUser, async (req, res) => {
   try {
     const amount = Number(req.body.amount);
@@ -196,6 +204,7 @@ app.post("/api/deposits", verifyUser, async (req, res) => {
       depositId: ref.id
     });
   } catch (error) {
+    console.error(error);
     res.status(500).json({
       success: false,
       message: "Gagal membuat permintaan deposit"
@@ -203,7 +212,6 @@ app.post("/api/deposits", verifyUser, async (req, res) => {
   }
 });
 
-// RIWAYAT DEPOSIT
 app.get("/api/deposits", verifyUser, async (req, res) => {
   try {
     const snapshot = await db.collection("deposits")
@@ -216,6 +224,7 @@ app.get("/api/deposits", verifyUser, async (req, res) => {
       deposits: snapshot.docs.map(cleanDocument)
     });
   } catch (error) {
+    console.error(error);
     res.status(500).json({
       success: false,
       message: "Gagal mengambil riwayat deposit"
@@ -223,7 +232,10 @@ app.get("/api/deposits", verifyUser, async (req, res) => {
   }
 });
 
-// AJUKAN PENARIKAN
+// ===============================
+// PENARIKAN PENGGUNA
+// ===============================
+
 app.post("/api/withdrawals", verifyUser, async (req, res) => {
   try {
     const amount = Number(req.body.amount);
@@ -293,14 +305,10 @@ app.post("/api/withdrawals", verifyUser, async (req, res) => {
       withdrawalId: withdrawalRef.id
     });
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      message: error.message || "Gagal membuat permintaan penarikan"
-    });
+    errorResponse(res, error, "Gagal membuat penarikan");
   }
 });
 
-// RIWAYAT PENARIKAN
 app.get("/api/withdrawals", verifyUser, async (req, res) => {
   try {
     const snapshot = await db.collection("withdrawals")
@@ -313,6 +321,7 @@ app.get("/api/withdrawals", verifyUser, async (req, res) => {
       withdrawals: snapshot.docs.map(cleanDocument)
     });
   } catch (error) {
+    console.error(error);
     res.status(500).json({
       success: false,
       message: "Gagal mengambil riwayat penarikan"
@@ -320,7 +329,10 @@ app.get("/api/withdrawals", verifyUser, async (req, res) => {
   }
 });
 
-// DAFTAR REKENING
+// ===============================
+// REKENING PENCAIRAN
+// ===============================
+
 app.get("/api/accounts", verifyUser, async (req, res) => {
   try {
     const snapshot = await db.collection("payout_accounts")
@@ -332,6 +344,7 @@ app.get("/api/accounts", verifyUser, async (req, res) => {
       accounts: snapshot.docs.map(cleanDocument)
     });
   } catch (error) {
+    console.error(error);
     res.status(500).json({
       success: false,
       message: "Gagal mengambil rekening"
@@ -339,7 +352,6 @@ app.get("/api/accounts", verifyUser, async (req, res) => {
   }
 });
 
-// TAMBAH REKENING
 app.post("/api/accounts", verifyUser, async (req, res) => {
   try {
     const bank = String(req.body.bank || "").trim();
@@ -370,9 +382,11 @@ app.post("/api/accounts", verifyUser, async (req, res) => {
 
     res.json({
       success: true,
+      message: "Rekening berhasil disimpan",
       accountId: ref.id
     });
   } catch (error) {
+    console.error(error);
     res.status(500).json({
       success: false,
       message: "Gagal menyimpan rekening"
@@ -380,27 +394,86 @@ app.post("/api/accounts", verifyUser, async (req, res) => {
   }
 });
 
-// ADMIN: DAFTAR DEPOSIT
-app.get("/api/admin/deposits", verifyUser, verifyAdmin, async (req, res) => {
-  try {
-    const snapshot = await db.collection("deposits")
-      .where("status", "==", "pending")
-      .limit(100)
-      .get();
+// ===============================
+// ADMIN: RINGKASAN DASHBOARD
+// ===============================
 
-    res.json({
-      success: true,
-      deposits: snapshot.docs.map(cleanDocument)
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Gagal mengambil data deposit"
-    });
+app.get("/api/admin/overview",
+  verifyUser, verifyAdmin, async (req, res) => {
+    try {
+      const [users, wallets, deposits, withdrawals] = await Promise.all([
+        db.collection("users").get(),
+        db.collection("wallets").get(),
+        db.collection("deposits").where("status", "==", "pending").get(),
+        db.collection("withdrawals").where("status", "==", "pending").get()
+      ]);
+
+      let totalBalance = 0;
+
+      wallets.docs.forEach(doc => {
+        totalBalance += Number(doc.data().balance || 0);
+      });
+
+      res.json({
+        success: true,
+        overview: {
+          totalUsers: users.size,
+          totalRecordedBalance: totalBalance,
+          pendingDeposits: deposits.size,
+          pendingWithdrawals: withdrawals.size
+        }
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({
+        success: false,
+        message: "Gagal mengambil ringkasan admin"
+      });
+    }
   }
-});
+);
 
+// ===============================
+// ADMIN: DAFTAR DEPOSIT
+// ===============================
+
+app.get("/api/admin/deposits",
+  verifyUser, verifyAdmin, async (req, res) => {
+    try {
+      const snapshot = await db.collection("deposits")
+        .where("status", "==", "pending")
+        .limit(100)
+        .get();
+
+      const deposits = await Promise.all(snapshot.docs.map(async doc => {
+        const data = cleanDocument(doc);
+        const user = await db.collection("users").doc(data.uid).get();
+
+        return {
+          ...data,
+          userName: user.exists ? user.data().fullName || "" : "",
+          userEmail: user.exists ? user.data().email || "" : ""
+        };
+      }));
+
+      res.json({
+        success: true,
+        deposits
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({
+        success: false,
+        message: "Gagal mengambil data deposit"
+      });
+    }
+  }
+);
+
+// ===============================
 // ADMIN: SETUJUI DEPOSIT
+// ===============================
+
 app.post("/api/admin/deposits/:id/approve",
   verifyUser, verifyAdmin, async (req, res) => {
     try {
@@ -415,6 +488,12 @@ app.post("/api/admin/deposits/:id/approve",
         }
 
         const data = deposit.data();
+        const amount = Number(data.amount);
+
+        if (!Number.isSafeInteger(amount) || amount < 10000) {
+          throw new Error("Nominal deposit tidak valid");
+        }
+
         const walletRef = db.collection("wallets").doc(data.uid);
         const wallet = await transaction.get(walletRef);
 
@@ -423,7 +502,7 @@ app.post("/api/admin/deposits/:id/approve",
           : 0;
 
         transaction.set(walletRef, {
-          balance: balance + data.amount,
+          balance: balance + amount,
           updatedAt: FieldValue.serverTimestamp()
         }, { merge: true });
 
@@ -436,7 +515,7 @@ app.post("/api/admin/deposits/:id/approve",
         transaction.set(ledgerRef, {
           uid: data.uid,
           type: "deposit",
-          amount: data.amount,
+          amount,
           referenceId: depositRef.id,
           createdAt: FieldValue.serverTimestamp()
         });
@@ -447,35 +526,94 @@ app.post("/api/admin/deposits/:id/approve",
         message: "Deposit disetujui"
       });
     } catch (error) {
-      res.status(400).json({
+      errorResponse(res, error, "Gagal menyetujui deposit");
+    }
+  }
+);
+
+// ===============================
+// ADMIN: TOLAK DEPOSIT
+// ===============================
+
+app.post("/api/admin/deposits/:id/reject",
+  verifyUser, verifyAdmin, async (req, res) => {
+    try {
+      const depositRef = db.collection("deposits").doc(req.params.id);
+
+      await db.runTransaction(async transaction => {
+        const deposit = await transaction.get(depositRef);
+
+        if (!deposit.exists || deposit.data().status !== "pending") {
+          throw new Error("Deposit tidak tersedia atau sudah diproses");
+        }
+
+        transaction.update(depositRef, {
+          status: "rejected",
+          reviewedAt: FieldValue.serverTimestamp(),
+          reviewedBy: req.user.uid
+        });
+      });
+
+      res.json({
+        success: true,
+        message: "Deposit ditolak"
+      });
+    } catch (error) {
+      errorResponse(res, error, "Gagal menolak deposit");
+    }
+  }
+);
+
+// ===============================
+// ADMIN: DAFTAR PENARIKAN
+// ===============================
+
+app.get("/api/admin/withdrawals",
+  verifyUser, verifyAdmin, async (req, res) => {
+    try {
+      const snapshot = await db.collection("withdrawals")
+        .where("status", "==", "pending")
+        .limit(100)
+        .get();
+
+      const withdrawals = await Promise.all(snapshot.docs.map(async doc => {
+        const data = cleanDocument(doc);
+
+        const [user, account] = await Promise.all([
+          db.collection("users").doc(data.uid).get(),
+          db.collection("payout_accounts").doc(data.accountId).get()
+        ]);
+
+        return {
+          ...data,
+          userName: user.exists ? user.data().fullName || "" : "",
+          userEmail: user.exists ? user.data().email || "" : "",
+          account: account.exists ? {
+            bank: account.data().bank || "",
+            accountName: account.data().accountName || "",
+            accountNumber: account.data().accountNumber || ""
+          } : null
+        };
+      }));
+
+      res.json({
+        success: true,
+        withdrawals
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({
         success: false,
-        message: error.message
+        message: "Gagal mengambil penarikan"
       });
     }
   }
 );
 
-// ADMIN: DAFTAR PENARIKAN
-app.get("/api/admin/withdrawals", verifyUser, verifyAdmin, async (req, res) => {
-  try {
-    const snapshot = await db.collection("withdrawals")
-      .where("status", "==", "pending")
-      .limit(100)
-      .get();
+// ===============================
+// ADMIN: TANDAI PENARIKAN DIBAYAR
+// ===============================
 
-    res.json({
-      success: true,
-      withdrawals: snapshot.docs.map(cleanDocument)
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Gagal mengambil penarikan"
-    });
-  }
-});
-
-// ADMIN: TANDAI SUDAH DIBAYAR
 app.post("/api/admin/withdrawals/:id/paid",
   verifyUser, verifyAdmin, async (req, res) => {
     try {
@@ -502,12 +640,12 @@ app.post("/api/admin/withdrawals/:id/paid",
             throw new Error("Saldo tidak mencukupi");
           }
 
+          const ledgerRef = db.collection("wallet_ledger").doc();
+
           transaction.set(walletRef, {
             balance: balance - data.amount,
             updatedAt: FieldValue.serverTimestamp()
           }, { merge: true });
-
-          const ledgerRef = db.collection("wallet_ledger").doc();
 
           transaction.set(ledgerRef, {
             uid: data.uid,
@@ -530,15 +668,15 @@ app.post("/api/admin/withdrawals/:id/paid",
         message: "Penarikan dicatat sebagai sudah dibayar"
       });
     } catch (error) {
-      res.status(400).json({
-        success: false,
-        message: error.message
-      });
+      errorResponse(res, error, "Gagal memproses penarikan");
     }
   }
 );
 
+// ===============================
 // ADMIN: TOLAK PENARIKAN DAN KEMBALIKAN SALDO
+// ===============================
+
 app.post("/api/admin/withdrawals/:id/reject",
   verifyUser, verifyAdmin, async (req, res) => {
     try {
@@ -561,12 +699,12 @@ app.post("/api/admin/withdrawals/:id/reject",
             ? Number(wallet.data().balance || 0)
             : 0;
 
+          const ledgerRef = db.collection("wallet_ledger").doc();
+
           transaction.set(walletRef, {
             balance: balance + data.amount,
             updatedAt: FieldValue.serverTimestamp()
           }, { merge: true });
-
-          const ledgerRef = db.collection("wallet_ledger").doc();
 
           transaction.set(ledgerRef, {
             uid: data.uid,
@@ -586,18 +724,18 @@ app.post("/api/admin/withdrawals/:id/reject",
 
       res.json({
         success: true,
-        message: "Penarikan ditolak"
+        message: "Penarikan ditolak dan saldo dikembalikan jika sebelumnya dicadangkan"
       });
     } catch (error) {
-      res.status(400).json({
-        success: false,
-        message: error.message
-      });
+      errorResponse(res, error, "Gagal menolak penarikan");
     }
   }
 );
 
+// ===============================
 // JALANKAN SERVER
+// ===============================
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`ROYAL EMPIRE server berjalan di port ${PORT}`);
 });

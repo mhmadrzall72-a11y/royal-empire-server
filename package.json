@@ -1,0 +1,14 @@
+{
+  "name": "royal-empire-server",
+  "version": "1.0.0",
+  "description": "Backend ROYAL EMPIRE",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "firebase-admin": "^13.0.2"
+  }
+}

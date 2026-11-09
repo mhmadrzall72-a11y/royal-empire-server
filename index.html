@@ -152,6 +152,15 @@ button{cursor:pointer}
   flex-shrink:0;background:#54242e;color:white;border:0;
   border-radius:8px;padding:9px 11px;font-size:11px;font-weight:bold;
 }
+
+.package-card{background:linear-gradient(145deg,#302044,#1d1230);border:1px solid #765633;border-radius:15px;padding:17px;margin:12px 0}
+.package-card h3{color:var(--gold2);margin:0 0 8px}
+.package-price{font-size:22px;font-weight:900;margin:10px 0;color:#fff}
+.package-meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}
+.package-meta div{background:#170f25;border:1px solid var(--border);border-radius:9px;padding:9px;font-size:11px;color:var(--muted)}
+.package-meta b{display:block;color:var(--gold2);font-size:13px;margin-top:4px}
+.package-card .btn{margin-top:8px}
+
 @media(max-width:480px){
   .container{padding:15px}
   .grid{gap:9px}
@@ -296,6 +305,19 @@ button{cursor:pointer}
       <div class="panel" id="depositHistory">Belum ada data.</div>
     </section>
 
+
+    <section id="packagesPage" class="page">
+      <div class="section-title">Pilihan Paket</div>
+      <div class="notice">
+        Pilih paket dan baca durasi serta nilai hasilnya sebelum membeli.
+        Pembelian menggunakan saldo tersedia. Hasil baru masuk saldo setelah
+        jatuh tempo dan diverifikasi admin.
+      </div>
+      <div id="packageList"><div class="empty">Memuat paket...</div></div>
+      <div class="section-title">Paket Saya</div>
+      <div class="panel" id="myPackages"><div class="empty">Memuat paket kamu...</div></div>
+    </section>
+
     <section id="withdrawPage" class="page">
       <div class="section-title">Penarikan Dana</div>
       <div class="panel">
@@ -430,6 +452,13 @@ button{cursor:pointer}
         </div>
       </div>
 
+
+      <div class="section-title">Paket jatuh tempo</div>
+      <div class="panel">
+        <div class="muted">Hasil paket hanya dapat dikreditkan setelah jatuh tempo dan setelah admin memastikan dana tersedia.</div>
+        <div id="adminPackages"><div class="empty">Memuat paket jatuh tempo...</div></div>
+      </div>
+
       <div class="notice">
         Verifikasi pembayaran secara nyata sebelum menyetujui deposit.
         Tandai penarikan sudah dibayar hanya setelah transfer benar-benar dilakukan.
@@ -441,6 +470,7 @@ button{cursor:pointer}
   <nav class="nav">
     <button class="active" onclick="navigate('homePage',this)"><span>⌂</span>Home</button>
     <button onclick="navigate('depositPage',this)"><span>＋</span>Deposit</button>
+    <button onclick="navigate('packagesPage',this)"><span>♛</span>Paket</button>
     <button onclick="navigate('withdrawPage',this)"><span>⇧</span>Tarik</button>
     <button onclick="navigate('historyPage',this)"><span>▤</span>Riwayat</button>
     <button onclick="navigate('profilePage',this)"><span>♙</span>Akun</button>
@@ -696,6 +726,87 @@ async function submitDeposit(){
   }
 }
 
+
+async function loadPackages(){
+  const box=document.getElementById("packageList");
+  box.innerHTML='<div class="empty">Memuat paket...</div>';
+  try{
+    const data=await api("/api/packages");
+    const packages=data.packages||[];
+    box.innerHTML="";
+    packages.forEach(p=>{
+      const card=document.createElement("div");
+      card.className="package-card";
+      const title=document.createElement("h3"); title.textContent=p.name;
+      const price=document.createElement("div"); price.className="package-price"; price.textContent=rupiah(p.price);
+      const desc=document.createElement("div"); desc.className="muted"; desc.textContent=p.description||"";
+      const meta=document.createElement("div"); meta.className="package-meta";
+      const values=[
+        ["Durasi",p.durationDays+" hari"],
+        ["Keuntungan",p.profitPercent+"%"],
+        ["Hasil total",rupiah(p.totalReturn)],
+        ["Keuntungan bersih",rupiah(p.profitAmount)]
+      ];
+      values.forEach(v=>{
+        const cell=document.createElement("div");
+        const label=document.createElement("span"); label.textContent=v[0];
+        const b=document.createElement("b"); b.textContent=v[1];
+        cell.append(label,b); meta.appendChild(cell);
+      });
+      const button=document.createElement("button");
+      button.className="btn"; button.textContent="BELI PAKET";
+      button.onclick=()=>purchasePackage(p.id,p.name,p.price);
+      card.append(title,price,desc,meta,button);
+      box.appendChild(card);
+    });
+    if(!packages.length)box.innerHTML='<div class="empty">Belum ada paket.</div>';
+  }catch(e){box.innerHTML='<div class="empty">Gagal memuat paket: '+escapeHTML(e.message)+'</div>';}
+}
+
+async function loadMyPackages(){
+  const box=document.getElementById("myPackages");
+  if(!box)return;
+  try{
+    const data=await api("/api/packages/mine");
+    const items=data.packages||[];
+    box.innerHTML="";
+    if(!items.length){box.innerHTML='<div class="empty">Kamu belum membeli paket.</div>';return;}
+    items.forEach(p=>{
+      const row=document.createElement("div");row.className="item";
+      const title=document.createElement("b");title.textContent=(p.packageName||"Paket")+" — "+rupiah(p.purchaseAmount);
+      const status=document.createElement("div");status.className="status";
+      status.textContent="Status: "+(p.status==="settled"?"Hasil sudah dikreditkan":p.status==="active"?"Berjalan":" "+p.status);
+      const detail=document.createElement("div");detail.className="muted";
+      detail.style.marginTop="5px";
+      detail.textContent="Jatuh tempo: "+formatDate(p.maturityAt)+" | Hasil total: "+rupiah(p.totalReturn);
+      row.append(title,status,detail);box.appendChild(row);
+    });
+  }catch(e){box.innerHTML='<div class="empty">Gagal memuat paket: '+escapeHTML(e.message)+'</div>';}
+}
+
+async function purchasePackage(id,name,price){
+  if(!confirm("Beli "+name+" seharga "+rupiah(price)+" dari saldo kamu?"))return;
+  try{
+    const result=await api("/api/packages/purchase",{
+      method:"POST",body:JSON.stringify({packageId:id})
+    });
+    toast(result.message||"Paket berhasil dibeli.");
+    await Promise.all([loadWallet(),loadMyPackages()]);
+  }catch(e){toast(e.message);}
+}
+
+async function sendHelp(){
+  const message=document.getElementById("helpMessage").value.trim();
+  if(!message)return toast("Tuliskan pesan bantuan.");
+  try{
+    const result=await api("/api/support",{
+      method:"POST",body:JSON.stringify({message})
+    });
+    document.getElementById("helpMessage").value="";
+    toast(result.message||"Pesan bantuan berhasil dikirim.");
+  }catch(e){toast("Bantuan: "+e.message);}
+}
+
 async function submitWithdrawal(){
   const amount=getAmountValue("withdrawAmount");
   const accountId=document.getElementById("withdrawAccount").value;
@@ -874,14 +985,6 @@ async function loadWithdrawals(){
   }
 }
 
-function sendHelp(){
-  const message=document.getElementById("helpMessage").value.trim();
-
-  if(!message)return toast("Tuliskan pesan bantuan.");
-
-  toast("Pusat bantuan belum tersambung ke server.");
-}
-
 /* ===========================
    ADMIN PANEL
 =========================== */
@@ -930,7 +1033,8 @@ async function loadAdmin(){
   const results=await Promise.allSettled([
     api("/api/admin/overview"),
     api("/api/admin/deposits"),
-    api("/api/admin/withdrawals")
+    api("/api/admin/withdrawals"),
+    api("/api/admin/packages/due")
   ]);
 
   if(results[0].status==="fulfilled"){
@@ -962,6 +1066,46 @@ async function loadAdmin(){
       '<div class="empty">Gagal memuat penarikan: '+escapeHTML(results[2].reason.message)+'</div>';
     console.error("Admin withdrawals:",results[2].reason);
   }
+
+  if(results[3]&&results[3].status==="fulfilled"){
+    renderAdminPackages(results[3].value.packages||[]);
+  }else if(results[3]){
+    document.getElementById("adminPackages").innerHTML=
+      '<div class="empty">Gagal memuat paket: '+escapeHTML(results[3].reason.message)+'</div>';
+  }
+}
+
+function renderAdminPackages(items){
+  const box=document.getElementById("adminPackages");
+  if(!box)return;
+  box.innerHTML="";
+  if(!items.length){box.innerHTML='<div class="empty">Belum ada paket yang jatuh tempo.</div>';return;}
+  items.forEach(p=>{
+    const card=document.createElement("div");card.className="admin-card";
+    const title=document.createElement("strong");title.textContent=(p.packageName||"Paket")+" — "+rupiah(p.totalReturn);
+    card.appendChild(title);
+    addAdminDetail(card,"Pengguna",p.userName||p.uid);
+    addAdminDetail(card,"Email",p.userEmail||"-");
+    addAdminDetail(card,"Modal",rupiah(p.purchaseAmount));
+    addAdminDetail(card,"Jatuh tempo",formatDate(p.maturityAt));
+    const actions=document.createElement("div");actions.className="admin-actions";
+    const settle=document.createElement("button");settle.className="btn success small";
+    settle.textContent="KREDITKAN HASIL";
+    settle.onclick=()=>adminSettlePackage(p.id);
+    actions.appendChild(settle);card.appendChild(actions);box.appendChild(card);
+  });
+}
+
+async function adminSettlePackage(id){
+  if(!isAdmin||!id)return toast("Akses atau ID paket tidak valid.");
+  if(!confirm("Pastikan dana hasil paket tersedia. Kreditkan hasil total ke saldo pengguna?"))return;
+  try{
+    const result=await api("/api/admin/packages/"+encodeURIComponent(id)+"/settle",{
+      method:"POST",body:JSON.stringify({})
+    });
+    toast(result.message||"Hasil paket berhasil dikreditkan.");
+    await Promise.all([loadAdmin(),loadWallet(),loadMyPackages()]);
+  }catch(e){toast("Paket: "+e.message);}
 }
 
 function escapeHTML(value){

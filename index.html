@@ -309,9 +309,9 @@ button{cursor:pointer}
     <section id="packagesPage" class="page">
       <div class="section-title">Pilihan Paket</div>
       <div class="notice">
-        Pilih paket dan baca durasi serta nilai hasilnya sebelum membeli.
-        Pembelian menggunakan saldo tersedia. Hasil baru masuk saldo setelah
-        jatuh tempo dan diverifikasi admin.
+        Periksa harga, durasi, estimasi keuntungan, dan total bersih sebelum membeli.
+        Nilai hasil merupakan estimasi, bukan jaminan. Pembelian menggunakan saldo tersedia.
+        Pengajuan hasil setelah jatuh tempo tetap memerlukan verifikasi admin dan ketersediaan dana.
       </div>
       <div id="packageList"><div class="empty">Memuat paket...</div></div>
       <div class="section-title">Paket Saya</div>
@@ -550,12 +550,12 @@ function navigate(page,button,skipLoad=false){
 
   if(page==="homePage")loadWallet();
 
-  if(page==="depositPage")loadDeposits();
-
   if(page==="packagesPage"){
     loadPackages();
     loadMyPackages();
   }
+
+  if(page==="depositPage")loadDeposits();
 
   if(page==="withdrawPage"){
     loadAccounts();
@@ -734,60 +734,109 @@ async function submitDeposit(){
 
 async function loadPackages(){
   const box=document.getElementById("packageList");
+  if(!box)return;
   box.innerHTML='<div class="empty">Memuat paket...</div>';
+
   try{
     const data=await api("/api/packages");
     const packages=data.packages||[];
     box.innerHTML="";
+
     packages.forEach(p=>{
       const card=document.createElement("div");
       card.className="package-card";
-      const title=document.createElement("h3"); title.textContent=p.name;
-      const price=document.createElement("div"); price.className="package-price"; price.textContent=rupiah(p.price);
-      const desc=document.createElement("div"); desc.className="muted"; desc.textContent=p.description||"";
-      const meta=document.createElement("div"); meta.className="package-meta";
+
+      const title=document.createElement("h3");
+      title.textContent=p.name||"Paket";
+
+      const price=document.createElement("div");
+      price.className="package-price";
+      price.textContent=rupiah(p.price);
+
+      const desc=document.createElement("div");
+      desc.className="muted";
+      desc.textContent=p.description||"";
+
+      const meta=document.createElement("div");
+      meta.className="package-meta";
+
+      const profit=Number(p.profitAmount||0);
+      const total=Number(p.totalReturn||0);
       const values=[
-        ["Durasi",p.durationDays+" hari"],
-        ["Keuntungan",p.profitPercent+"%"],
-        ["Hasil total",rupiah(p.totalReturn)],
-        ["Keuntungan bersih",rupiah(p.profitAmount)]
+        ["Durasi",Number(p.durationDays||0)+" hari"],
+        ["Keuntungan",rupiah(profit)],
+        ["Total bersih",rupiah(total)]
       ];
+
       values.forEach(v=>{
         const cell=document.createElement("div");
-        const label=document.createElement("span"); label.textContent=v[0];
-        const b=document.createElement("b"); b.textContent=v[1];
-        cell.append(label,b); meta.appendChild(cell);
+        const label=document.createElement("span");
+        label.textContent=v[0];
+        const value=document.createElement("b");
+        value.textContent=v[1];
+        cell.append(label,value);
+        meta.appendChild(cell);
       });
+
       const button=document.createElement("button");
-      button.className="btn"; button.textContent="BELI PAKET";
+      button.className="btn";
+      button.textContent="BELI PAKET";
       button.onclick=()=>purchasePackage(p.id,p.name,p.price);
+
       card.append(title,price,desc,meta,button);
       box.appendChild(card);
     });
-    if(!packages.length)box.innerHTML='<div class="empty">Belum ada paket.</div>';
-  }catch(e){box.innerHTML='<div class="empty">Gagal memuat paket: '+escapeHTML(e.message)+'</div>';}
+
+    if(!packages.length){
+      box.innerHTML='<div class="empty">Belum ada paket.</div>';
+    }
+  }catch(e){
+    box.innerHTML='<div class="empty">Gagal memuat paket: '+escapeHTML(e.message)+'</div>';
+  }
 }
 
 async function loadMyPackages(){
   const box=document.getElementById("myPackages");
   if(!box)return;
+
   try{
     const data=await api("/api/packages/mine");
     const items=data.packages||[];
     box.innerHTML="";
-    if(!items.length){box.innerHTML='<div class="empty">Kamu belum membeli paket.</div>';return;}
+
+    if(!items.length){
+      box.innerHTML='<div class="empty">Kamu belum membeli paket.</div>';
+      return;
+    }
+
     items.forEach(p=>{
-      const row=document.createElement("div");row.className="item";
-      const title=document.createElement("b");title.textContent=(p.packageName||"Paket")+" — "+rupiah(p.purchaseAmount);
-      const status=document.createElement("div");status.className="status";
-      status.textContent="Status: "+(p.status==="settled"?"Hasil sudah dikreditkan":p.status==="active"?"Berjalan":" "+p.status);
-      const detail=document.createElement("div");detail.className="muted";
+      const row=document.createElement("div");
+      row.className="item";
+
+      const title=document.createElement("b");
+      title.textContent=(p.packageName||"Paket")+" — "+rupiah(p.purchaseAmount);
+
+      const status=document.createElement("div");
+      status.className="status";
+      status.textContent="Status: "+(
+        p.status==="settled"?"Hasil sudah dikreditkan":
+        p.status==="active"?"Berjalan":String(p.status||"-")
+      );
+
+      const detail=document.createElement("div");
+      detail.className="muted";
       detail.style.marginTop="5px";
-      detail.textContent="Jatuh tempo: "+formatDate(p.maturityAt)+" | Hasil total: "+rupiah(p.totalReturn);
-      row.append(title,status,detail);box.appendChild(row);
+      detail.textContent=
+        "Jatuh tempo: "+formatDate(p.maturityAt)+
+        " | Keuntungan: "+rupiah(p.profitAmount)+
+        " | Total bersih: "+rupiah(p.totalReturn);
+
+      row.append(title,status,detail);
+      box.appendChild(row);
     });
-  }catch(e){box.innerHTML='<div class="empty">Gagal memuat paket: '+escapeHTML(e.message)+'</div>';
- }
+  }catch(e){
+    box.innerHTML='<div class="empty">Gagal memuat paket: '+escapeHTML(e.message)+'</div>';
+  }
 }
 
 async function purchasePackage(id,name,price){
@@ -1088,7 +1137,7 @@ function renderAdminPackages(items){
   if(!items.length){box.innerHTML='<div class="empty">Belum ada paket yang jatuh tempo.</div>';return;}
   items.forEach(p=>{
     const card=document.createElement("div");card.className="admin-card";
-    const title=document.createElement("strong");title.textContent=(p.packageName||"Paket")+" — "+rupiah(p.totalReturn);
+    const title=document.createElement("strong");title.textContent=(p.packageName||"Paket")+" — Total bersih: "+rupiah(p.totalReturn);
     card.appendChild(title);
     addAdminDetail(card,"Pengguna",p.userName||p.uid);
     addAdminDetail(card,"Email",p.userEmail||"-");

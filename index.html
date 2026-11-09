@@ -552,6 +552,11 @@ function navigate(page,button,skipLoad=false){
 
   if(page==="depositPage")loadDeposits();
 
+  if(page==="packagesPage"){
+    loadPackages();
+    loadMyPackages();
+  }
+
   if(page==="withdrawPage"){
     loadAccounts();
     loadWallet();

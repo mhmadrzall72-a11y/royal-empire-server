@@ -61,7 +61,9 @@ button{cursor:pointer}
 }
 .btn.secondary{background:var(--panel2);color:var(--gold2);border:1px solid var(--border)}
 .btn.danger{background:#54242e;color:white}
+.btn.success{background:#245c43;color:white}
 .btn.small{width:auto;padding:10px 14px;margin:0;font-size:12px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
 .auth-links{text-align:center;margin-top:18px;color:var(--muted);font-size:13px}
 .auth-links a{color:var(--gold2);cursor:pointer}
 #app{min-height:100vh;padding-bottom:85px}
@@ -97,6 +99,7 @@ button{cursor:pointer}
   display:flex;justify-content:space-around;
   background:#190f27;border-top:1px solid var(--border);
   padding:10px 4px calc(10px + env(safe-area-inset-bottom));
+  overflow-x:auto;
 }
 .nav button{
   background:none;border:0;color:var(--muted);
@@ -124,10 +127,23 @@ button{cursor:pointer}
   width:max-content;max-width:90%;font-size:13px;
 }
 .empty{text-align:center;color:var(--muted);padding:15px 5px;font-size:13px}
+.admin-stat{background:linear-gradient(140deg,#302044,#1d1230);border-color:#765633}
+.admin-stat b{font-size:20px}
+.admin-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.admin-actions .btn{flex:1;min-width:100px}
+.admin-card{border-bottom:1px solid var(--border);padding:15px 0}
+.admin-card:last-child{border-bottom:0}
+.admin-card strong{color:var(--gold2)}
+.admin-detail{font-size:12px;color:var(--muted);line-height:1.7;margin-top:7px;overflow-wrap:anywhere}
+.admin-label{
+  display:inline-block;padding:5px 9px;border-radius:7px;
+  background:#38264c;color:var(--gold2);font-size:10px;margin-top:7px
+}
 @media(max-width:480px){
   .container{padding:15px}
   .grid{gap:9px}
   .stat{padding:13px}
+  .nav button{min-width:48px;font-size:9px}
 }
 </style>
 </head>
@@ -361,6 +377,55 @@ button{cursor:pointer}
       <button class="btn danger" onclick="logout()">KELUAR</button>
     </section>
 
+    <!-- ADMIN -->
+    <section id="adminPage" class="page">
+      <div class="welcome">ADMIN PANEL</div>
+      <div class="muted">Pengelolaan transaksi ROYAL EMPIRE</div>
+
+      <div class="row" style="margin-top:18px">
+        <strong style="color:var(--gold2)">Ringkasan sistem</strong>
+        <button class="btn secondary small" onclick="loadAdmin()">↻ Segarkan</button>
+      </div>
+
+      <div class="grid">
+        <div class="stat admin-stat">
+          <span class="muted">Total pengguna</span>
+          <b id="adminUsers">0</b>
+        </div>
+        <div class="stat admin-stat">
+          <span class="muted">Total saldo tercatat</span>
+          <b id="adminBalance">Rp 0</b>
+        </div>
+        <div class="stat admin-stat">
+          <span class="muted">Deposit menunggu</span>
+          <b id="adminPendingDeposits">0</b>
+        </div>
+        <div class="stat admin-stat">
+          <span class="muted">Penarikan menunggu</span>
+          <b id="adminPendingWithdrawals">0</b>
+        </div>
+      </div>
+
+      <div class="section-title">Pengajuan deposit</div>
+      <div class="panel">
+        <div id="adminDeposits">
+          <div class="empty">Memuat pengajuan deposit...</div>
+        </div>
+      </div>
+
+      <div class="section-title">Pengajuan penarikan</div>
+      <div class="panel">
+        <div id="adminWithdrawals">
+          <div class="empty">Memuat pengajuan penarikan...</div>
+        </div>
+      </div>
+
+      <div class="notice">
+        Verifikasi pembayaran secara nyata sebelum menyetujui deposit.
+        Tandai penarikan sudah dibayar hanya setelah transfer benar-benar dilakukan.
+      </div>
+    </section>
+
   </main>
 
   <nav class="nav">
@@ -369,6 +434,7 @@ button{cursor:pointer}
     <button onclick="navigate('withdrawPage',this)"><span>⇧</span>Tarik</button>
     <button onclick="navigate('historyPage',this)"><span>▤</span>Riwayat</button>
     <button onclick="navigate('profilePage',this)"><span>♙</span>Akun</button>
+    <button id="adminNav" class="hidden" onclick="navigate('adminPage',this)"><span>♛</span>Admin</button>
   </nav>
 </div>
 
@@ -389,6 +455,7 @@ const auth = firebase.auth();
 const API_BASE = "https://royal-empire-server.hostless.app";
 let currentUser = null;
 let userProfile = null;
+let isAdmin = false;
 let toastTimer = null;
 
 function toast(message){
@@ -411,6 +478,11 @@ function showAuth(id){
 }
 
 function navigate(page,button){
+  if(page==="adminPage"&&!isAdmin){
+    toast("Akses admin tidak tersedia.");
+    return;
+  }
+
   document.querySelectorAll(".page").forEach(x=>x.classList.remove("active"));
   document.getElementById(page).classList.add("active");
 
@@ -428,6 +500,7 @@ function navigate(page,button){
     loadDeposits();
     loadWithdrawals();
   }
+  if(page==="adminPage")loadAdmin();
 }
 
 function openAccounts(){
@@ -515,7 +588,17 @@ async function loadProfile(){
     document.getElementById("profileName").textContent=name;
     document.getElementById("profileEmail").textContent=currentUser.email||"-";
     document.getElementById("profileEmail2").textContent=currentUser.email||"-";
+
+    // Hak admin dibaca dari profil server, bukan dari input pengguna.
+    isAdmin=String(userProfile.role||"").toLowerCase()==="admin";
+    document.getElementById("adminNav").classList.toggle("hidden",!isAdmin);
+
+    if(!isAdmin&&document.getElementById("adminPage").classList.contains("active")){
+      navigate("homePage",document.querySelector(".nav button"));
+    }
   }catch(e){
+    isAdmin=false;
+    document.getElementById("adminNav").classList.add("hidden");
     toast("Profil: "+e.message);
   }
 }
@@ -526,8 +609,6 @@ async function loadWallet(){
 
   try{
     const data=await api("/api/wallet");
-
-    // Mendukung beberapa bentuk respons wallet dari backend.
     const wallet=data.wallet||data;
     const balance=wallet.balance??wallet.amount??data.balance??0;
 
@@ -576,8 +657,6 @@ async function submitWithdrawal(){
 
     toast(result.message||"Permintaan penarikan dikirim.");
     document.getElementById("withdrawAmount").value="";
-
-    // Saldo dan riwayat diperbarui setelah pengajuan berhasil.
     await loadWallet();
     await loadWithdrawals();
   }catch(e){toast(e.message);}
@@ -705,6 +784,238 @@ function sendHelp(){
   toast("Pusat bantuan belum tersambung ke server.");
 }
 
+/* ===========================
+   ADMIN PANEL
+=========================== */
+
+function setAdminText(id,value){
+  document.getElementById(id).textContent=value;
+}
+
+function addAdminDetail(parent,label,value){
+  const line=document.createElement("div");
+  line.className="admin-detail";
+  line.textContent=label+": "+(value===undefined||value===null||value===""?"-":String(value));
+  parent.appendChild(line);
+}
+
+function formatDate(value){
+  if(!value)return "-";
+  if(typeof value==="object"&&value._seconds){
+    value=new Date(value._seconds*1000);
+  }else if(typeof value==="object"&&value.seconds){
+    value=new Date(value.seconds*1000);
+  }else{
+    value=new Date(value);
+  }
+  if(Number.isNaN(value.getTime()))return String(value);
+  return value.toLocaleString("id-ID");
+}
+
+async function loadAdmin(){
+  if(!isAdmin)return toast("Akses admin tidak tersedia.");
+
+  setAdminText("adminUsers","...");
+  setAdminText("adminBalance","Memuat...");
+  setAdminText("adminPendingDeposits","...");
+  setAdminText("adminPendingWithdrawals","...");
+
+  document.getElementById("adminDeposits").innerHTML=
+    '<div class="empty">Memuat pengajuan deposit...</div>';
+  document.getElementById("adminWithdrawals").innerHTML=
+    '<div class="empty">Memuat pengajuan penarikan...</div>';
+
+  const results=await Promise.allSettled([
+    api("/api/admin/overview"),
+    api("/api/admin/deposits"),
+    api("/api/admin/withdrawals")
+  ]);
+
+  if(results[0].status==="fulfilled"){
+    const raw=results[0].value;
+    const overview=raw.overview||raw.stats||raw;
+
+    setAdminText("adminUsers",Number(overview.totalUsers||0).toLocaleString("id-ID"));
+    setAdminText("adminBalance",rupiah(overview.totalRecordedBalance||0));
+    setAdminText("adminPendingDeposits",Number(overview.pendingDeposits||0).toLocaleString("id-ID"));
+    setAdminText("adminPendingWithdrawals",Number(overview.pendingWithdrawals||0).toLocaleString("id-ID"));
+  }else{
+    setAdminText("adminUsers","Gagal");
+    setAdminText("adminBalance","Gagal");
+    console.error("Admin overview:",results[0].reason);
+  }
+
+  if(results[1].status==="fulfilled"){
+    renderAdminDeposits(results[1].value.deposits||[]);
+  }else{
+    document.getElementById("adminDeposits").innerHTML=
+      '<div class="empty">Gagal memuat deposit: '+escapeHTML(results[1].reason.message)+'</div>';
+    console.error("Admin deposits:",results[1].reason);
+  }
+
+  if(results[2].status==="fulfilled"){
+    renderAdminWithdrawals(results[2].value.withdrawals||[]);
+  }else{
+    document.getElementById("adminWithdrawals").innerHTML=
+      '<div class="empty">Gagal memuat penarikan: '+escapeHTML(results[2].reason.message)+'</div>';
+    console.error("Admin withdrawals:",results[2].reason);
+  }
+}
+
+function escapeHTML(value){
+  return String(value??"").replace(/[&<>"']/g,char=>({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  })[char]);
+}
+
+function renderAdminDeposits(items){
+  const container=document.getElementById("adminDeposits");
+  container.innerHTML="";
+
+  if(!items.length){
+    container.innerHTML='<div class="empty">Tidak ada deposit yang menunggu verifikasi.</div>';
+    setAdminText("adminPendingDeposits","0");
+    return;
+  }
+
+  items.forEach(item=>{
+    const card=document.createElement("div");
+    card.className="admin-card";
+
+    const title=document.createElement("strong");
+    title.textContent=rupiah(item.amount);
+    card.appendChild(title);
+
+    const badge=document.createElement("div");
+    badge.className="admin-label";
+    badge.textContent="MENUNGGU VERIFIKASI";
+    card.appendChild(badge);
+
+    addAdminDetail(card,"Nama pengguna",item.fullName||item.userName||item.name||"-");
+    addAdminDetail(card,"Email",item.userEmail||item.email||"-");
+    addAdminDetail(card,"Metode",item.method||"-");
+    addAdminDetail(card,"Tanggal",formatDate(item.createdAt||item.created_at));
+
+    const actions=document.createElement("div");
+    actions.className="admin-actions";
+
+    const approve=document.createElement("button");
+    approve.className="btn success small";
+    approve.textContent="SETUJUI";
+    approve.onclick=()=>adminDepositAction(item.id,"approve");
+
+    const reject=document.createElement("button");
+    reject.className="btn danger small";
+    reject.textContent="TOLAK";
+    reject.onclick=()=>adminDepositAction(item.id,"reject");
+
+    actions.append(approve,reject);
+    card.appendChild(actions);
+    container.appendChild(card);
+  });
+}
+
+function renderAdminWithdrawals(items){
+  const container=document.getElementById("adminWithdrawals");
+  container.innerHTML="";
+
+  if(!items.length){
+    container.innerHTML='<div class="empty">Tidak ada penarikan yang menunggu.</div>';
+    setAdminText("adminPendingWithdrawals","0");
+    return;
+  }
+
+  items.forEach(item=>{
+    const card=document.createElement("div");
+    card.className="admin-card";
+
+    const title=document.createElement("strong");
+    title.textContent=rupiah(item.amount);
+    card.appendChild(title);
+
+    const badge=document.createElement("div");
+    badge.className="admin-label";
+    badge.textContent="MENUNGGU PEMBAYARAN";
+    card.appendChild(badge);
+
+    addAdminDetail(card,"Nama pengguna",item.fullName||item.userName||item.name||"-");
+    addAdminDetail(card,"Email",item.userEmail||item.email||"-");
+
+    const account=item.account||item.payoutAccount||{};
+    addAdminDetail(card,"Bank / E-wallet",account.bank||item.bank||"-");
+    addAdminDetail(card,"Nama rekening",account.accountName||item.accountName||"-");
+    addAdminDetail(card,"Nomor rekening",account.accountNumber||item.accountNumber||"-");
+    addAdminDetail(card,"Tanggal",formatDate(item.createdAt||item.created_at));
+
+    const actions=document.createElement("div");
+    actions.className="admin-actions";
+
+    const paid=document.createElement("button");
+    paid.className="btn success small";
+    paid.textContent="SUDAH DIBAYAR";
+    paid.onclick=()=>adminWithdrawalAction(item.id,"paid");
+
+    const reject=document.createElement("button");
+    reject.className="btn danger small";
+    reject.textContent="TOLAK";
+    reject.onclick=()=>adminWithdrawalAction(item.id,"reject");
+
+    actions.append(paid,reject);
+    card.appendChild(actions);
+    container.appendChild(card);
+  });
+}
+
+async function adminDepositAction(id,action){
+  if(!isAdmin)return toast("Akses ditolak.");
+  if(!id)return toast("ID deposit tidak ditemukan.");
+
+  const message=action==="approve"
+    ?"Setujui deposit ini? Pastikan pembayaran benar-benar sudah diterima."
+    :"Tolak pengajuan deposit ini?";
+
+  if(!confirm(message))return;
+
+  try{
+    const result=await api("/api/admin/deposits/"+encodeURIComponent(id)+"/"+action,{
+      method:"POST",
+      body:JSON.stringify({})
+    });
+    toast(result.message||(action==="approve"?"Deposit disetujui.":"Deposit ditolak."));
+    await loadAdmin();
+    await loadDeposits();
+    await loadWallet();
+  }catch(e){
+    toast("Deposit: "+e.message);
+  }
+}
+
+async function adminWithdrawalAction(id,action){
+  if(!isAdmin)return toast("Akses ditolak.");
+  if(!id)return toast("ID penarikan tidak ditemukan.");
+
+  const message=action==="paid"
+    ?"Konfirmasi bahwa dana penarikan ini sudah benar-benar ditransfer?"
+    :"Tolak penarikan ini? Saldo yang ditahan akan dikembalikan sesuai proses server.";
+
+  if(!confirm(message))return;
+
+  try{
+    const result=await api("/api/admin/withdrawals/"+encodeURIComponent(id)+"/"+action,{
+      method:"POST",
+      body:JSON.stringify({})
+    });
+    toast(result.message||(action==="paid"?"Penarikan ditandai sudah dibayar.":"Penarikan ditolak."));
+    await loadAdmin();
+  }catch(e){
+    toast("Penarikan: "+e.message);
+  }
+}
+
+/* ===========================
+   LOGOUT DAN STATUS LOGIN
+=========================== */
+
 async function logout(){
   try{
     await auth.signOut();
@@ -722,14 +1033,21 @@ auth.onAuthStateChanged(async user=>{
     document.getElementById("app").classList.remove("hidden");
     document.getElementById("userEmail").textContent=user.email||"";
 
-    // Setelah login, buka Home dan muat data akun.
+    isAdmin=false;
+    document.getElementById("adminNav").classList.add("hidden");
+
     navigate("homePage",document.querySelector(".nav button"));
+
     await Promise.all([
       loadProfile(),
       loadWallet(),
       loadAccounts()
     ]);
   }else{
+    isAdmin=false;
+    userProfile=null;
+
+    document.getElementById("adminNav").classList.add("hidden");
     document.getElementById("app").classList.add("hidden");
     document.getElementById("authScreen").classList.remove("hidden");
     showAuth("loginForm");

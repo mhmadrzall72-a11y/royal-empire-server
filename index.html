@@ -786,7 +786,8 @@ async function loadMyPackages(){
       detail.textContent="Jatuh tempo: "+formatDate(p.maturityAt)+" | Hasil total: "+rupiah(p.totalReturn);
       row.append(title,status,detail);box.appendChild(row);
     });
-  }catch(e){box.innerHTML='<div class="empty">Gagal memuat paket: '+escapeHTML(e.message)+'</div>';}
+  }catch(e){box.innerHTML='<div class="empty">Gagal memuat paket: '+escapeHTML(e.message)+'</div>';
+ }
 }
 
 async function purchasePackage(id,name,price){

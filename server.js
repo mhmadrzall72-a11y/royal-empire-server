@@ -1,3 +1,4 @@
+
 const express = require("express");
 const cors = require("cors");
 const admin = require("firebase-admin");
@@ -12,7 +13,7 @@ app.use(cors({
 
 app.use(express.json({ limit: "1mb" }));
 
-// Firebase Admin SDK
+// FIREBASE ADMIN
 if (!admin.apps.length) {
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     const serviceAccount = JSON.parse(
@@ -29,9 +30,18 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 const auth = admin.auth();
-
 const PORT = process.env.PORT || 8000;
+const FieldValue = admin.firestore.FieldValue;
 
+// FORMAT DATA FIRESTORE
+function cleanDocument(doc) {
+  return {
+    id: doc.id,
+    ...doc.data()
+  };
+}
+
+// VERIFIKASI LOGIN
 async function verifyUser(req, res, next) {
   try {
     const header = req.headers.authorization || "";
@@ -43,10 +53,7 @@ async function verifyUser(req, res, next) {
       });
     }
 
-    const token = header.substring(7);
-    const decoded = await auth.verifyIdToken(token);
-
-    req.user = decoded;
+    req.user = await auth.verifyIdToken(header.substring(7));
     next();
   } catch (error) {
     return res.status(401).json({
@@ -56,10 +63,10 @@ async function verifyUser(req, res, next) {
   }
 }
 
+// VERIFIKASI ADMIN
 async function verifyAdmin(req, res, next) {
   try {
-    const userDoc = await db
-      .collection("users")
+    const userDoc = await db.collection("users")
       .doc(req.user.uid)
       .get();
 
@@ -79,7 +86,7 @@ async function verifyAdmin(req, res, next) {
   }
 }
 
-// Health check
+// HEALTH CHECK
 app.get("/", (req, res) => {
   res.json({
     success: true,
@@ -88,24 +95,25 @@ app.get("/", (req, res) => {
   });
 });
 
-// Data profil pengguna
+// PROFIL PENGGUNA
 app.get("/api/profile", verifyUser, async (req, res) => {
   try {
     const ref = db.collection("users").doc(req.user.uid);
-    const snapshot = await ref.get();
+    let snapshot = await ref.get();
 
     if (!snapshot.exists) {
       await ref.set({
         uid: req.user.uid,
         email: req.user.email || "",
-        fullName: "",
+        fullName: req.user.name || "",
         role: "user",
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
+        createdAt: FieldValue.serverTimestamp()
       });
+
+      snapshot = await ref.get();
     }
 
-    const updated = await ref.get();
-    const data = updated.data();
+    const data = snapshot.data();
 
     res.json({
       success: true,
@@ -124,7 +132,28 @@ app.get("/api/profile", verifyUser, async (req, res) => {
   }
 });
 
-// Buat permintaan deposit
+// SALDO PENGGUNA
+app.get("/api/wallet", verifyUser, async (req, res) => {
+  try {
+    const wallet = await db.collection("wallets")
+      .doc(req.user.uid)
+      .get();
+
+    res.json({
+      success: true,
+      balance: wallet.exists
+        ? Number(wallet.data().balance || 0)
+        : 0
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Gagal mengambil saldo"
+    });
+  }
+});
+
+// AJUKAN DEPOSIT
 app.post("/api/deposits", verifyUser, async (req, res) => {
   try {
     const amount = Number(req.body.amount);
@@ -149,7 +178,7 @@ app.post("/api/deposits", verifyUser, async (req, res) => {
       amount,
       method,
       status: "pending",
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
+      createdAt: FieldValue.serverTimestamp()
     });
 
     res.json({
@@ -165,7 +194,7 @@ app.post("/api/deposits", verifyUser, async (req, res) => {
   }
 });
 
-// Riwayat deposit
+// RIWAYAT DEPOSIT
 app.get("/api/deposits", verifyUser, async (req, res) => {
   try {
     const snapshot = await db.collection("deposits")
@@ -175,10 +204,7 @@ app.get("/api/deposits", verifyUser, async (req, res) => {
 
     res.json({
       success: true,
-      deposits: snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }))
+      deposits: snapshot.docs.map(cleanDocument)
     });
   } catch (error) {
     res.status(500).json({
@@ -188,7 +214,7 @@ app.get("/api/deposits", verifyUser, async (req, res) => {
   }
 });
 
-// Buat permintaan penarikan
+// AJUKAN PENARIKAN
 app.post("/api/withdrawals", verifyUser, async (req, res) => {
   try {
     const amount = Number(req.body.amount);
@@ -208,39 +234,85 @@ app.post("/api/withdrawals", verifyUser, async (req, res) => {
       });
     }
 
-    const account = await db.collection("payout_accounts")
-      .doc(accountId)
-      .get();
+    const accountRef = db.collection("payout_accounts").doc(accountId);
+    const walletRef = db.collection("wallets").doc(req.user.uid);
+    const withdrawalRef = db.collection("withdrawals").doc();
+    const ledgerRef = db.collection("wallet_ledger").doc();
 
-    if (!account.exists || account.data().uid !== req.user.uid) {
-      return res.status(400).json({
-        success: false,
-        message: "Rekening tujuan tidak valid"
+    await db.runTransaction(async transaction => {
+      const account = await transaction.get(accountRef);
+      const wallet = await transaction.get(walletRef);
+
+      if (!account.exists || account.data().uid !== req.user.uid) {
+        throw new Error("Rekening tujuan tidak valid");
+      }
+
+      const balance = wallet.exists
+        ? Number(wallet.data().balance || 0)
+        : 0;
+
+      if (balance < amount) {
+        throw new Error("Saldo tidak mencukupi");
+      }
+
+      // Cadangkan saldo saat pengajuan dibuat.
+      transaction.set(walletRef, {
+        balance: balance - amount,
+        updatedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      transaction.set(withdrawalRef, {
+        uid: req.user.uid,
+        amount,
+        accountId,
+        status: "pending",
+        fundsReserved: true,
+        createdAt: FieldValue.serverTimestamp()
       });
-    }
 
-    const ref = await db.collection("withdrawals").add({
-      uid: req.user.uid,
-      amount,
-      accountId,
-      status: "pending",
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
+      transaction.set(ledgerRef, {
+        uid: req.user.uid,
+        type: "withdrawal_reserved",
+        amount: -amount,
+        referenceId: withdrawalRef.id,
+        createdAt: FieldValue.serverTimestamp()
+      });
     });
 
     res.json({
       success: true,
       message: "Permintaan penarikan berhasil dibuat",
-      withdrawalId: ref.id
+      withdrawalId: withdrawalRef.id
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(400).json({
       success: false,
-      message: "Gagal membuat permintaan penarikan"
+      message: error.message || "Gagal membuat permintaan penarikan"
     });
   }
 });
 
-// Daftar rekening pengguna
+// RIWAYAT PENARIKAN PENGGUNA
+app.get("/api/withdrawals", verifyUser, async (req, res) => {
+  try {
+    const snapshot = await db.collection("withdrawals")
+      .where("uid", "==", req.user.uid)
+      .limit(100)
+      .get();
+
+    res.json({
+      success: true,
+      withdrawals: snapshot.docs.map(cleanDocument)
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Gagal mengambil riwayat penarikan"
+    });
+  }
+});
+
+// DAFTAR REKENING
 app.get("/api/accounts", verifyUser, async (req, res) => {
   try {
     const snapshot = await db.collection("payout_accounts")
@@ -249,10 +321,7 @@ app.get("/api/accounts", verifyUser, async (req, res) => {
 
     res.json({
       success: true,
-      accounts: snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }))
+      accounts: snapshot.docs.map(cleanDocument)
     });
   } catch (error) {
     res.status(500).json({
@@ -262,7 +331,7 @@ app.get("/api/accounts", verifyUser, async (req, res) => {
   }
 });
 
-// Tambah rekening tujuan
+// TAMBAH REKENING
 app.post("/api/accounts", verifyUser, async (req, res) => {
   try {
     const bank = String(req.body.bank || "").trim();
@@ -288,7 +357,7 @@ app.post("/api/accounts", verifyUser, async (req, res) => {
       bank,
       accountName,
       accountNumber,
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
+      createdAt: FieldValue.serverTimestamp()
     });
 
     res.json({
@@ -303,7 +372,7 @@ app.post("/api/accounts", verifyUser, async (req, res) => {
   }
 });
 
-// Admin: lihat permintaan deposit
+// ADMIN: DAFTAR DEPOSIT MENUNGGU
 app.get("/api/admin/deposits", verifyUser, verifyAdmin, async (req, res) => {
   try {
     const snapshot = await db.collection("deposits")
@@ -313,10 +382,7 @@ app.get("/api/admin/deposits", verifyUser, verifyAdmin, async (req, res) => {
 
     res.json({
       success: true,
-      deposits: snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }))
+      deposits: snapshot.docs.map(cleanDocument)
     });
   } catch (error) {
     res.status(500).json({
@@ -326,11 +392,12 @@ app.get("/api/admin/deposits", verifyUser, verifyAdmin, async (req, res) => {
   }
 });
 
-// Admin: verifikasi deposit
+// ADMIN: SETUJUI DEPOSIT
 app.post("/api/admin/deposits/:id/approve",
   verifyUser, verifyAdmin, async (req, res) => {
     try {
       const depositRef = db.collection("deposits").doc(req.params.id);
+      const ledgerRef = db.collection("wallet_ledger").doc();
 
       await db.runTransaction(async transaction => {
         const deposit = await transaction.get(depositRef);
@@ -343,29 +410,27 @@ app.post("/api/admin/deposits/:id/approve",
         const walletRef = db.collection("wallets").doc(data.uid);
         const wallet = await transaction.get(walletRef);
 
-        const currentBalance = wallet.exists
+        const balance = wallet.exists
           ? Number(wallet.data().balance || 0)
           : 0;
 
         transaction.set(walletRef, {
-          balance: currentBalance + data.amount,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          balance: balance + data.amount,
+          updatedAt: FieldValue.serverTimestamp()
         }, { merge: true });
 
         transaction.update(depositRef, {
           status: "approved",
-          reviewedAt: admin.firestore.FieldValue.serverTimestamp(),
+          reviewedAt: FieldValue.serverTimestamp(),
           reviewedBy: req.user.uid
         });
-
-        const ledgerRef = db.collection("wallet_ledger").doc();
 
         transaction.set(ledgerRef, {
           uid: data.uid,
           type: "deposit",
           amount: data.amount,
           referenceId: depositRef.id,
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
+          createdAt: FieldValue.serverTimestamp()
         });
       });
 
@@ -382,7 +447,7 @@ app.post("/api/admin/deposits/:id/approve",
   }
 );
 
-// Admin: lihat permintaan penarikan
+// ADMIN: DAFTAR PENARIKAN
 app.get("/api/admin/withdrawals", verifyUser, verifyAdmin, async (req, res) => {
   try {
     const snapshot = await db.collection("withdrawals")
@@ -392,10 +457,7 @@ app.get("/api/admin/withdrawals", verifyUser, verifyAdmin, async (req, res) => {
 
     res.json({
       success: true,
-      withdrawals: snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }))
+      withdrawals: snapshot.docs.map(cleanDocument)
     });
   } catch (error) {
     res.status(500).json({
@@ -405,7 +467,7 @@ app.get("/api/admin/withdrawals", verifyUser, verifyAdmin, async (req, res) => {
   }
 });
 
-// Admin: tandai penarikan telah dibayar setelah transfer benar-benar dilakukan
+// ADMIN: TANDAI PENARIKAN SUDAH DIBAYAR
 app.post("/api/admin/withdrawals/:id/paid",
   verifyUser, verifyAdmin, async (req, res) => {
     try {
@@ -419,36 +481,40 @@ app.post("/api/admin/withdrawals/:id/paid",
         }
 
         const data = withdrawal.data();
-        const walletRef = db.collection("wallets").doc(data.uid);
-        const wallet = await transaction.get(walletRef);
 
-        const balance = wallet.exists
-          ? Number(wallet.data().balance || 0)
-          : 0;
+        // Kompatibilitas dengan pengajuan lama yang belum mencadangkan saldo.
+        if (data.fundsReserved !== true) {
+          const walletRef = db.collection("wallets").doc(data.uid);
+          const wallet = await transaction.get(walletRef);
 
-        if (balance < data.amount) {
-          throw new Error("Saldo tidak mencukupi");
+          const balance = wallet.exists
+            ? Number(wallet.data().balance || 0)
+            : 0;
+
+          if (balance < data.amount) {
+            throw new Error("Saldo tidak mencukupi");
+          }
+
+          transaction.set(walletRef, {
+            balance: balance - data.amount,
+            updatedAt: FieldValue.serverTimestamp()
+          }, { merge: true });
+
+          const ledgerRef = db.collection("wallet_ledger").doc();
+
+          transaction.set(ledgerRef, {
+            uid: data.uid,
+            type: "withdrawal",
+            amount: -data.amount,
+            referenceId: withdrawalRef.id,
+            createdAt: FieldValue.serverTimestamp()
+          });
         }
-
-        transaction.update(walletRef, {
-          balance: balance - data.amount,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
 
         transaction.update(withdrawalRef, {
           status: "paid",
-          reviewedAt: admin.firestore.FieldValue.serverTimestamp(),
+          reviewedAt: FieldValue.serverTimestamp(),
           reviewedBy: req.user.uid
-        });
-
-        const ledgerRef = db.collection("wallet_ledger").doc();
-
-        transaction.set(ledgerRef, {
-          uid: data.uid,
-          type: "withdrawal",
-          amount: -data.amount,
-          referenceId: withdrawalRef.id,
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
       });
 
@@ -465,6 +531,66 @@ app.post("/api/admin/withdrawals/:id/paid",
   }
 );
 
+// ADMIN: TOLAK PENARIKAN DAN KEMBALIKAN SALDO CADANGAN
+app.post("/api/admin/withdrawals/:id/reject",
+  verifyUser, verifyAdmin, async (req, res) => {
+    try {
+      const withdrawalRef = db.collection("withdrawals").doc(req.params.id);
+
+      await db.runTransaction(async transaction => {
+        const withdrawal = await transaction.get(withdrawalRef);
+
+        if (!withdrawal.exists || withdrawal.data().status !== "pending") {
+          throw new Error("Penarikan tidak tersedia atau sudah diproses");
+        }
+
+        const data = withdrawal.data();
+
+        if (data.fundsReserved === true) {
+          const walletRef = db.collection("wallets").doc(data.uid);
+          const wallet = await transaction.get(walletRef);
+
+          const balance = wallet.exists
+            ? Number(wallet.data().balance || 0)
+            : 0;
+
+          transaction.set(walletRef, {
+            balance: balance + data.amount,
+            updatedAt: FieldValue.serverTimestamp()
+          }, { merge: true });
+
+          const ledgerRef = db.collection("wallet_ledger").doc();
+
+          transaction.set(ledgerRef, {
+            uid: data.uid,
+            type: "withdrawal_refund",
+            amount: data.amount,
+            referenceId: withdrawalRef.id,
+            createdAt: FieldValue.serverTimestamp()
+          });
+        }
+
+        transaction.update(withdrawalRef, {
+          status: "rejected",
+          reviewedAt: FieldValue.serverTimestamp(),
+          reviewedBy: req.user.uid
+        });
+      });
+
+      res.json({
+        success: true,
+        message: "Penarikan ditolak"
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
+  }
+);
+
+// JALANKAN SERVER
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`ROYAL EMPIRE server berjalan di port ${PORT}`);
 });

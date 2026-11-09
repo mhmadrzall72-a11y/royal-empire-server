@@ -8,7 +8,7 @@ const app = express();
 
 app.use(cors({
   origin: true,
-  methods: ["GET", "POST"],
+  methods: ["GET", "POST", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
@@ -99,24 +99,19 @@ function cleanDocument(doc) {
 
 function errorResponse(res, error, fallback) {
   console.error(fallback, error);
-
-  const message = error.message || fallback;
-  const duplicate = message === "Rekening sudah terdaftar.";
-
-  return res.status(duplicate ? 409 : 400).json({
+  return res.status(400).json({
     success: false,
-    message
+    message: error.message || fallback
   });
 }
 
-// Normalisasi nomor rekening: hanya angka, tanpa spasi atau tanda baca.
+// Normalisasi nomor agar 0812-3456 sama dengan 08123456.
 function normalizeAccountNumber(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
-// ID dokumen index dibuat dari hash agar nomor rekening tidak tampil
-// sebagai ID dokumen Firestore.
-function accountNumberKey(number) {
+// ID indeks tidak menyimpan nomor rekening secara langsung.
+function accountIndexId(number) {
   return crypto.createHash("sha256")
     .update(number)
     .digest("hex");
@@ -369,12 +364,13 @@ app.get("/api/accounts", verifyUser, async (req, res) => {
   }
 });
 
+// Tambah rekening + pemeriksaan nomor duplikat.
 app.post("/api/accounts", verifyUser, async (req, res) => {
   try {
     const bank = String(req.body.bank || "").trim();
     const accountName = String(req.body.accountName || "").trim();
     const accountNumber = String(req.body.accountNumber || "").trim();
-    const normalizedNumber = normalizeAccountNumber(accountNumber);
+    const normalized = normalizeAccountNumber(accountNumber);
 
     if (!bank || !accountName || !accountNumber) {
       return res.status(400).json({
@@ -383,10 +379,7 @@ app.post("/api/accounts", verifyUser, async (req, res) => {
       });
     }
 
-    if (
-      normalizedNumber.length < 5 ||
-      normalizedNumber.length > 30
-    ) {
+    if (normalized.length < 5 || normalized.length > 30) {
       return res.status(400).json({
         success: false,
         message: "Nomor rekening tidak valid"
@@ -394,52 +387,49 @@ app.post("/api/accounts", verifyUser, async (req, res) => {
     }
 
     const accountsRef = db.collection("payout_accounts");
-    const indexRef = db.collection("payout_account_number_index")
-      .doc(accountNumberKey(normalizedNumber));
+    const indexRef = db.collection("payout_account_numbers")
+      .doc(accountIndexId(normalized));
 
-    // Pemeriksaan data lama untuk rekening yang tersimpan sebelum
-    // sistem index duplikat ini dipasang.
-    const existingAccounts = await accountsRef.get();
+    // Periksa rekening lama milik pengguna, termasuk data sebelum fitur indeks.
+    const oldAccounts = await accountsRef
+      .where("uid", "==", req.user.uid)
+      .get();
 
-    const duplicateLegacy = existingAccounts.docs.some(doc => {
+    const alreadyExists = oldAccounts.docs.some(doc => {
       const data = doc.data();
-      const existingNumber = normalizeAccountNumber(
-        data.accountNumberNormalized || data.accountNumber || ""
-      );
-
-      return existingNumber === normalizedNumber;
+      return normalizeAccountNumber(
+        data.accountNumberNormalized || data.accountNumber
+      ) === normalized;
     });
 
-    if (duplicateLegacy) {
+    if (alreadyExists) {
       return res.status(409).json({
         success: false,
         message: "Rekening sudah terdaftar."
       });
     }
 
-    const accountRef = accountsRef.doc();
+    const ref = accountsRef.doc();
 
-    // Transaksi memastikan dua permintaan bersamaan tidak bisa
-    // menyimpan nomor rekening yang sama.
     await db.runTransaction(async transaction => {
-      const indexSnapshot = await transaction.get(indexRef);
+      const index = await transaction.get(indexRef);
 
-      if (indexSnapshot.exists) {
+      if (index.exists) {
         throw new Error("Rekening sudah terdaftar.");
       }
 
-      transaction.create(indexRef, {
-        uid: req.user.uid,
-        accountId: accountRef.id,
-        createdAt: FieldValue.serverTimestamp()
-      });
-
-      transaction.create(accountRef, {
+      transaction.set(ref, {
         uid: req.user.uid,
         bank,
         accountName,
         accountNumber,
-        accountNumberNormalized: normalizedNumber,
+        accountNumberNormalized: normalized,
+        createdAt: FieldValue.serverTimestamp()
+      });
+
+      transaction.set(indexRef, {
+        uid: req.user.uid,
+        accountId: ref.id,
         createdAt: FieldValue.serverTimestamp()
       });
     });
@@ -447,10 +437,98 @@ app.post("/api/accounts", verifyUser, async (req, res) => {
     res.json({
       success: true,
       message: "Rekening berhasil disimpan",
-      accountId: accountRef.id
+      accountId: ref.id
     });
   } catch (error) {
-    errorResponse(res, error, "Gagal menyimpan rekening");
+    if (error.message === "Rekening sudah terdaftar.") {
+      return res.status(409).json({
+        success: false,
+        message: error.message
+      });
+    }
+
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: "Gagal menyimpan rekening"
+    });
+  }
+});
+
+// Hapus rekening milik pengguna yang sedang login.
+app.delete("/api/accounts/:id", verifyUser, async (req, res) => {
+  try {
+    const accountId = String(req.params.id || "").trim();
+
+    if (!accountId) {
+      return res.status(400).json({
+        success: false,
+        message: "ID rekening tidak valid"
+      });
+    }
+
+    const accountRef = db.collection("payout_accounts").doc(accountId);
+
+    await db.runTransaction(async transaction => {
+      const account = await transaction.get(accountRef);
+
+      if (!account.exists || account.data().uid !== req.user.uid) {
+        throw new Error("Rekening tidak ditemukan.");
+      }
+
+      const pending = await db.collection("withdrawals")
+        .where("accountId", "==", accountId)
+        .where("status", "==", "pending")
+        .limit(1)
+        .get();
+
+      if (!pending.empty) {
+        throw new Error(
+          "Rekening sedang digunakan pengajuan penarikan. Coba lagi setelah diproses."
+        );
+      }
+
+      const data = account.data();
+      const normalized = normalizeAccountNumber(
+        data.accountNumberNormalized || data.accountNumber
+      );
+
+      if (normalized) {
+        const indexRef = db.collection("payout_account_numbers")
+          .doc(accountIndexId(normalized));
+
+        const index = await transaction.get(indexRef);
+
+        if (index.exists && index.data().accountId === accountId) {
+          transaction.delete(indexRef);
+        }
+      }
+
+      transaction.delete(accountRef);
+    });
+
+    res.json({
+      success: true,
+      message: "Rekening berhasil dihapus."
+    });
+  } catch (error) {
+    const message = error.message || "";
+
+    if (
+      message === "Rekening tidak ditemukan." ||
+      message.startsWith("Rekening sedang digunakan")
+    ) {
+      return res.status(400).json({
+        success: false,
+        message
+      });
+    }
+
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: "Gagal menghapus rekening"
+    });
   }
 });
 

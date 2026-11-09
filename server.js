@@ -2,6 +2,7 @@
 const express = require("express");
 const cors = require("cors");
 const admin = require("firebase-admin");
+const path = require("path");
 
 const app = express();
 
@@ -12,6 +13,9 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: "1mb" }));
+
+// Sajikan file frontend
+app.use(express.static(__dirname));
 
 // FIREBASE ADMIN
 if (!admin.apps.length) {
@@ -33,13 +37,19 @@ const auth = admin.auth();
 const PORT = process.env.PORT || 8000;
 const FieldValue = admin.firestore.FieldValue;
 
-// FORMAT DATA FIRESTORE
-function cleanDocument(doc) {
-  return {
-    id: doc.id,
-    ...doc.data()
-  };
-}
+// HALAMAN UTAMA
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
+});
+
+// HEALTH CHECK
+app.get("/api/health", (req, res) => {
+  res.json({
+    success: true,
+    app: "ROYAL EMPIRE",
+    status: "online"
+  });
+});
 
 // VERIFIKASI LOGIN
 async function verifyUser(req, res, next) {
@@ -86,14 +96,13 @@ async function verifyAdmin(req, res, next) {
   }
 }
 
-// HEALTH CHECK
-app.get("/", (req, res) => {
-  res.json({
-    success: true,
-    app: "ROYAL EMPIRE",
-    status: "online"
-  });
-});
+// FORMAT DOKUMEN
+function cleanDocument(doc) {
+  return {
+    id: doc.id,
+    ...doc.data()
+  };
+}
 
 // PROFIL PENGGUNA
 app.get("/api/profile", verifyUser, async (req, res) => {
@@ -255,7 +264,6 @@ app.post("/api/withdrawals", verifyUser, async (req, res) => {
         throw new Error("Saldo tidak mencukupi");
       }
 
-      // Cadangkan saldo saat pengajuan dibuat.
       transaction.set(walletRef, {
         balance: balance - amount,
         updatedAt: FieldValue.serverTimestamp()
@@ -292,7 +300,7 @@ app.post("/api/withdrawals", verifyUser, async (req, res) => {
   }
 });
 
-// RIWAYAT PENARIKAN PENGGUNA
+// RIWAYAT PENARIKAN
 app.get("/api/withdrawals", verifyUser, async (req, res) => {
   try {
     const snapshot = await db.collection("withdrawals")
@@ -372,7 +380,7 @@ app.post("/api/accounts", verifyUser, async (req, res) => {
   }
 });
 
-// ADMIN: DAFTAR DEPOSIT MENUNGGU
+// ADMIN: DAFTAR DEPOSIT
 app.get("/api/admin/deposits", verifyUser, verifyAdmin, async (req, res) => {
   try {
     const snapshot = await db.collection("deposits")
@@ -467,7 +475,7 @@ app.get("/api/admin/withdrawals", verifyUser, verifyAdmin, async (req, res) => {
   }
 });
 
-// ADMIN: TANDAI PENARIKAN SUDAH DIBAYAR
+// ADMIN: TANDAI SUDAH DIBAYAR
 app.post("/api/admin/withdrawals/:id/paid",
   verifyUser, verifyAdmin, async (req, res) => {
     try {
@@ -482,7 +490,6 @@ app.post("/api/admin/withdrawals/:id/paid",
 
         const data = withdrawal.data();
 
-        // Kompatibilitas dengan pengajuan lama yang belum mencadangkan saldo.
         if (data.fundsReserved !== true) {
           const walletRef = db.collection("wallets").doc(data.uid);
           const wallet = await transaction.get(walletRef);
@@ -531,7 +538,7 @@ app.post("/api/admin/withdrawals/:id/paid",
   }
 );
 
-// ADMIN: TOLAK PENARIKAN DAN KEMBALIKAN SALDO CADANGAN
+// ADMIN: TOLAK PENARIKAN DAN KEMBALIKAN SALDO
 app.post("/api/admin/withdrawals/:id/reject",
   verifyUser, verifyAdmin, async (req, res) => {
     try {

@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -6,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#10091d">
 <title>ROYAL EMPIRE</title>
+
+<link rel="preconnect" href="https://www.gstatic.com">
+<link rel="preconnect" href="https://www.googleapis.com">
+<link rel="preconnect" href="https://royal-empire-server.hostless.app">
 
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
@@ -139,6 +142,16 @@ button{cursor:pointer}
   display:inline-block;padding:5px 9px;border-radius:7px;
   background:#38264c;color:var(--gold2);font-size:10px;margin-top:7px
 }
+.account-item{
+  display:flex;justify-content:space-between;align-items:center;
+  gap:10px;padding:13px 0;border-bottom:1px solid var(--border);
+}
+.account-item:last-child{border-bottom:0}
+.account-info{min-width:0;overflow-wrap:anywhere}
+.delete-account{
+  flex-shrink:0;background:#54242e;color:white;border:0;
+  border-radius:8px;padding:9px 11px;font-size:11px;font-weight:bold;
+}
 @media(max-width:480px){
   .container{padding:15px}
   .grid{gap:9px}
@@ -214,7 +227,6 @@ button{cursor:pointer}
 
   <main class="container">
 
-    <!-- HOME -->
     <section id="homePage" class="page active">
       <div class="welcome">Selamat datang</div>
       <div class="muted" id="welcomeName">Akun ROYAL EMPIRE</div>
@@ -257,14 +269,15 @@ button{cursor:pointer}
       </div>
     </section>
 
-    <!-- DEPOSIT -->
     <section id="depositPage" class="page">
       <div class="section-title">Pengajuan Deposit</div>
       <div class="panel">
         <h3>Isi permintaan deposit</h3>
         <div class="field">
           <label>Nominal (Rupiah)</label>
-          <input id="depositAmount" type="number" min="10000" placeholder="Contoh: 50000">
+          <input id="depositAmount" type="text" inputmode="numeric"
+            autocomplete="off" placeholder="Contoh: 10.000"
+            oninput="formatAmountInput(this)">
         </div>
         <div class="field">
           <label>Metode pembayaran</label>
@@ -283,14 +296,15 @@ button{cursor:pointer}
       <div class="panel" id="depositHistory">Belum ada data.</div>
     </section>
 
-    <!-- WITHDRAW -->
     <section id="withdrawPage" class="page">
       <div class="section-title">Penarikan Dana</div>
       <div class="panel">
         <h3>Ajukan penarikan</h3>
         <div class="field">
           <label>Nominal penarikan</label>
-          <input id="withdrawAmount" type="number" min="10000" placeholder="Nominal rupiah">
+          <input id="withdrawAmount" type="text" inputmode="numeric"
+            autocomplete="off" placeholder="Contoh: 10.000"
+            oninput="formatAmountInput(this)">
         </div>
         <div class="field">
           <label>Rekening tujuan</label>
@@ -307,7 +321,6 @@ button{cursor:pointer}
       </div>
     </section>
 
-    <!-- ACCOUNTS -->
     <section id="accountPage" class="page">
       <div class="row">
         <div class="section-title">Rekening Pencairan</div>
@@ -336,7 +349,7 @@ button{cursor:pointer}
         </div>
         <div class="field">
           <label>Nomor rekening / nomor e-wallet</label>
-          <input id="accountNumber" placeholder="Masukkan nomor">
+          <input id="accountNumber" inputmode="numeric" placeholder="Masukkan nomor">
         </div>
         <button class="btn" onclick="addAccount()">SIMPAN REKENING</button>
       </div>
@@ -344,7 +357,6 @@ button{cursor:pointer}
       <div class="panel" id="accountList">Belum ada rekening.</div>
     </section>
 
-    <!-- HISTORY -->
     <section id="historyPage" class="page">
       <div class="section-title">Riwayat Transaksi</div>
       <div class="panel">
@@ -357,7 +369,6 @@ button{cursor:pointer}
       </div>
     </section>
 
-    <!-- PROFILE -->
     <section id="profilePage" class="page">
       <div class="section-title">Akun Saya</div>
       <div class="panel">
@@ -377,7 +388,6 @@ button{cursor:pointer}
       <button class="btn danger" onclick="logout()">KELUAR</button>
     </section>
 
-    <!-- ADMIN -->
     <section id="adminPage" class="page">
       <div class="welcome">ADMIN PANEL</div>
       <div class="muted">Pengelolaan transaksi ROYAL EMPIRE</div>
@@ -470,6 +480,23 @@ function rupiah(value){
   return "Rp "+Number(value||0).toLocaleString("id-ID");
 }
 
+// Ubah angka yang diketik menjadi format 10.000, 100.000, dan seterusnya.
+function formatAmountInput(input){
+  const digits=String(input.value||"").replace(/\D/g,"");
+  if(!digits){
+    input.value="";
+    return;
+  }
+  input.value=Number(digits).toLocaleString("id-ID");
+}
+
+// Ambil kembali angka murni untuk dikirim ke server.
+function getAmountValue(id){
+  const value=document.getElementById(id).value;
+  const digits=String(value||"").replace(/\D/g,"");
+  return digits ? Number(digits) : 0;
+}
+
 function showAuth(id){
   ["loginForm","registerForm","forgotForm"].forEach(x=>
     document.getElementById(x).classList.add("hidden")
@@ -477,7 +504,7 @@ function showAuth(id){
   document.getElementById(id).classList.remove("hidden");
 }
 
-function navigate(page,button){
+function navigate(page,button,skipLoad=false){
   if(page==="adminPage"&&!isAdmin){
     toast("Akses admin tidak tersedia.");
     return;
@@ -489,17 +516,24 @@ function navigate(page,button){
   document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("active"));
   if(button)button.classList.add("active");
 
+  if(skipLoad)return;
+
   if(page==="homePage")loadWallet();
+
   if(page==="depositPage")loadDeposits();
+
   if(page==="withdrawPage"){
     loadAccounts();
     loadWallet();
   }
+
   if(page==="accountPage")loadAccounts();
+
   if(page==="historyPage"){
     loadDeposits();
     loadWithdrawals();
   }
+
   if(page==="adminPage")loadAdmin();
 }
 
@@ -510,38 +544,51 @@ function openAccounts(){
 async function login(){
   const email=document.getElementById("loginEmail").value.trim();
   const password=document.getElementById("loginPassword").value;
+
   if(!email||!password)return toast("Isi email dan password.");
+
   try{
     await auth.signInWithEmailAndPassword(email,password);
     toast("Login berhasil.");
-  }catch(e){toast(authError(e));}
+  }catch(e){
+    toast(authError(e));
+  }
 }
 
 async function register(){
   const name=document.getElementById("regName").value.trim();
   const email=document.getElementById("regEmail").value.trim();
   const password=document.getElementById("regPassword").value;
+
   if(!name||!email||password.length<6)
     return toast("Lengkapi data. Password minimal 6 karakter.");
+
   try{
     const result=await auth.createUserWithEmailAndPassword(email,password);
     await result.user.updateProfile({displayName:name});
     toast("Pendaftaran berhasil.");
-  }catch(e){toast(authError(e));}
+  }catch(e){
+    toast(authError(e));
+  }
 }
 
 async function forgotPassword(){
   const email=document.getElementById("forgotEmail").value.trim();
+
   if(!email)return toast("Masukkan email.");
+
   try{
     await auth.sendPasswordResetEmail(email);
-    toast("Link reset password sudah dikirim.");
-  }catch(e){toast(authError(e));}
+    toast("Jika email terdaftar, link reset akan dikirim.");
+  }catch(e){
+    toast(authError(e));
+  }
 }
 
 function authError(e){
   const map={
     "auth/email-already-in-use":"Email sudah terdaftar.",
+    "auth/email-already-exists":"Email sudah terdaftar.",
     "auth/invalid-email":"Format email tidak benar.",
     "auth/weak-password":"Password terlalu lemah.",
     "auth/user-not-found":"Akun tidak ditemukan.",
@@ -549,11 +596,13 @@ function authError(e){
     "auth/invalid-credential":"Email atau password salah.",
     "auth/too-many-requests":"Terlalu banyak percobaan. Coba lagi nanti."
   };
+
   return map[e.code]||"Terjadi kesalahan: "+e.message;
 }
 
 async function api(path,options={}){
   if(!currentUser)throw new Error("Silakan login kembali.");
+
   const token=await currentUser.getIdToken();
 
   const response=await fetch(API_BASE+path,{
@@ -566,6 +615,7 @@ async function api(path,options={}){
   });
 
   let data={};
+
   try{
     data=await response.json();
   }catch(e){
@@ -584,12 +634,12 @@ async function loadProfile(){
     userProfile=data.profile||{};
 
     const name=userProfile.fullName||currentUser.displayName||"Pengguna";
+
     document.getElementById("welcomeName").textContent=name;
     document.getElementById("profileName").textContent=name;
     document.getElementById("profileEmail").textContent=currentUser.email||"-";
     document.getElementById("profileEmail2").textContent=currentUser.email||"-";
 
-    // Hak admin dibaca dari profil server, bukan dari input pengguna.
     isAdmin=String(userProfile.role||"").toLowerCase()==="admin";
     document.getElementById("adminNav").classList.toggle("hidden",!isAdmin);
 
@@ -622,7 +672,7 @@ async function loadWallet(){
 }
 
 async function submitDeposit(){
-  const amount=Number(document.getElementById("depositAmount").value);
+  const amount=getAmountValue("depositAmount");
   const method=document.getElementById("depositMethod").value;
 
   if(!Number.isSafeInteger(amount)||amount<10000)
@@ -636,17 +686,23 @@ async function submitDeposit(){
 
     toast(result.message||"Pengajuan berhasil.");
     document.getElementById("depositAmount").value="";
-    await loadDeposits();
-    await loadWallet();
-  }catch(e){toast(e.message);}
+
+    await Promise.all([
+      loadDeposits(),
+      loadWallet()
+    ]);
+  }catch(e){
+    toast(e.message);
+  }
 }
 
 async function submitWithdrawal(){
-  const amount=Number(document.getElementById("withdrawAmount").value);
+  const amount=getAmountValue("withdrawAmount");
   const accountId=document.getElementById("withdrawAccount").value;
 
   if(!Number.isSafeInteger(amount)||amount<10000)
     return toast("Minimal penarikan Rp10.000.");
+
   if(!accountId)return toast("Pilih rekening tujuan.");
 
   try{
@@ -657,9 +713,14 @@ async function submitWithdrawal(){
 
     toast(result.message||"Permintaan penarikan dikirim.");
     document.getElementById("withdrawAmount").value="";
-    await loadWallet();
-    await loadWithdrawals();
-  }catch(e){toast(e.message);}
+
+    await Promise.all([
+      loadWallet(),
+      loadWithdrawals()
+    ]);
+  }catch(e){
+    toast(e.message);
+  }
 }
 
 async function addAccount(){
@@ -671,23 +732,46 @@ async function addAccount(){
     return toast("Lengkapi semua data rekening.");
 
   try{
-    await api("/api/accounts",{
+    const result=await api("/api/accounts",{
       method:"POST",
       body:JSON.stringify({bank,accountName,accountNumber})
     });
 
-    toast("Rekening berhasil disimpan.");
+    toast(result.message||"Rekening berhasil disimpan.");
+
     document.getElementById("accountBank").value="";
     document.getElementById("accountName").value="";
     document.getElementById("accountNumber").value="";
+
     await loadAccounts();
-  }catch(e){toast(e.message);}
+  }catch(e){
+    toast(e.message);
+  }
+}
+
+// Hapus rekening dengan konfirmasi.
+async function deleteAccount(id){
+  if(!id)return toast("ID rekening tidak ditemukan.");
+
+  if(!confirm("Yakin ingin menghapus rekening ini?"))return;
+
+  try{
+    const result=await api("/api/accounts/"+encodeURIComponent(id),{
+      method:"DELETE"
+    });
+
+    toast(result.message||"Rekening berhasil dihapus.");
+    await loadAccounts();
+  }catch(e){
+    toast(e.message);
+  }
 }
 
 async function loadAccounts(){
   try{
     const data=await api("/api/accounts");
     const accounts=data.accounts||[];
+
     const list=document.getElementById("accountList");
     const select=document.getElementById("withdrawAccount");
 
@@ -701,7 +785,10 @@ async function loadAccounts(){
 
     accounts.forEach(a=>{
       const item=document.createElement("div");
-      item.className="item";
+      item.className="account-item";
+
+      const info=document.createElement("div");
+      info.className="account-info";
 
       const title=document.createElement("b");
       title.textContent=a.bank||"Metode pembayaran";
@@ -711,7 +798,15 @@ async function loadAccounts(){
       detail.style.marginTop="5px";
       detail.textContent=(a.accountName||"")+" — "+(a.accountNumber||"");
 
-      item.append(title,detail);
+      info.append(title,detail);
+
+      const remove=document.createElement("button");
+      remove.className="delete-account";
+      remove.textContent="HAPUS";
+      remove.type="button";
+      remove.onclick=()=>deleteAccount(a.id);
+
+      item.append(info,remove);
       list.appendChild(item);
 
       const option=document.createElement("option");
@@ -762,6 +857,7 @@ async function loadDeposits(){
   try{
     const data=await api("/api/deposits");
     const deposits=data.deposits||[];
+
     renderTransactions("depositHistory",deposits);
     renderTransactions("historyDeposit",deposits);
   }catch(e){
@@ -780,7 +876,9 @@ async function loadWithdrawals(){
 
 function sendHelp(){
   const message=document.getElementById("helpMessage").value.trim();
+
   if(!message)return toast("Tuliskan pesan bantuan.");
+
   toast("Pusat bantuan belum tersambung ke server.");
 }
 
@@ -801,6 +899,7 @@ function addAdminDetail(parent,label,value){
 
 function formatDate(value){
   if(!value)return "-";
+
   if(typeof value==="object"&&value._seconds){
     value=new Date(value._seconds*1000);
   }else if(typeof value==="object"&&value.seconds){
@@ -808,7 +907,9 @@ function formatDate(value){
   }else{
     value=new Date(value);
   }
+
   if(Number.isNaN(value.getTime()))return String(value);
+
   return value.toLocaleString("id-ID");
 }
 
@@ -822,6 +923,7 @@ async function loadAdmin(){
 
   document.getElementById("adminDeposits").innerHTML=
     '<div class="empty">Memuat pengajuan deposit...</div>';
+
   document.getElementById("adminWithdrawals").innerHTML=
     '<div class="empty">Memuat pengajuan penarikan...</div>';
 
@@ -981,10 +1083,14 @@ async function adminDepositAction(id,action){
       method:"POST",
       body:JSON.stringify({})
     });
+
     toast(result.message||(action==="approve"?"Deposit disetujui.":"Deposit ditolak."));
-    await loadAdmin();
-    await loadDeposits();
-    await loadWallet();
+
+    await Promise.all([
+      loadAdmin(),
+      loadDeposits(),
+      loadWallet()
+    ]);
   }catch(e){
     toast("Deposit: "+e.message);
   }
@@ -1005,8 +1111,13 @@ async function adminWithdrawalAction(id,action){
       method:"POST",
       body:JSON.stringify({})
     });
+
     toast(result.message||(action==="paid"?"Penarikan ditandai sudah dibayar.":"Penarikan ditolak."));
-    await loadAdmin();
+
+    await Promise.all([
+      loadAdmin(),
+      loadWallet()
+    ]);
   }catch(e){
     toast("Penarikan: "+e.message);
   }
@@ -1036,7 +1147,8 @@ auth.onAuthStateChanged(async user=>{
     isAdmin=false;
     document.getElementById("adminNav").classList.add("hidden");
 
-    navigate("homePage",document.querySelector(".nav button"));
+    // skipLoad mencegah loadWallet dipanggil dua kali saat login.
+    navigate("homePage",document.querySelector(".nav button"),true);
 
     await Promise.all([
       loadProfile(),

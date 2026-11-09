@@ -30,6 +30,31 @@ const db = admin.firestore();
 const auth = admin.auth();
 const PORT = process.env.PORT || 8000;
 const FieldValue = admin.firestore.FieldValue;
+const Timestamp = admin.firestore.Timestamp;
+
+// Katalog paket layanan. Tidak menjanjikan keuntungan atau pengembalian dana.
+const PACKAGES = {
+  paket_1_hari: {
+    id: "paket_1_hari", name: "Paket 1 Hari", price: 75000,
+    durationDays: 1, profitPercent: 0, profitAmount: 0,
+    totalReturn: 0, description: "Akses layanan selama 1 hari."
+  },
+  paket_5_hari: {
+    id: "paket_5_hari", name: "Paket 5 Hari", price: 250000,
+    durationDays: 5, profitPercent: 0, profitAmount: 0,
+    totalReturn: 0, description: "Akses layanan selama 5 hari."
+  },
+  royal: {
+    id: "royal", name: "Royal", price: 800000,
+    durationDays: 15, profitPercent: 0, profitAmount: 0,
+    totalReturn: 0, description: "Akses layanan Royal selama 15 hari."
+  },
+  emperor: {
+    id: "emperor", name: "Emperor", price: 1500000,
+    durationDays: 30, profitPercent: 0, profitAmount: 0,
+    totalReturn: 0, description: "Akses layanan Emperor selama 30 hari."
+  }
+};
 
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
@@ -43,9 +68,7 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// ===============================
 // AUTENTIKASI DAN HAK AKSES
-// ===============================
 
 async function verifyUser(req, res, next) {
   try {
@@ -105,21 +128,17 @@ function errorResponse(res, error, fallback) {
   });
 }
 
-// Normalisasi nomor rekening.
 function normalizeAccountNumber(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
-// ID indeks rekening.
 function accountIndexId(number) {
   return crypto.createHash("sha256")
     .update(number)
     .digest("hex");
 }
 
-// ===============================
 // PROFIL DAN SALDO PENGGUNA
-// ===============================
 
 app.get("/api/profile", verifyUser, async (req, res) => {
   try {
@@ -179,9 +198,7 @@ app.get("/api/wallet", verifyUser, async (req, res) => {
   }
 });
 
-// ===============================
 // DEPOSIT PENGGUNA
-// ===============================
 
 app.post("/api/deposits", verifyUser, async (req, res) => {
   try {
@@ -244,9 +261,7 @@ app.get("/api/deposits", verifyUser, async (req, res) => {
   }
 });
 
-// ===============================
 // PENARIKAN PENGGUNA
-// ===============================
 
 app.post("/api/withdrawals", verifyUser, async (req, res) => {
   try {
@@ -454,7 +469,7 @@ app.post("/api/accounts", verifyUser, async (req, res) => {
   }
 });
 
-// Hapus rekening milik pengguna yang login.
+// Hapus rekening milik pengguna yang sedang login.
 app.delete("/api/accounts/:id", verifyUser, async (req, res) => {
   try {
     const accountId = String(req.params.id || "").trim();
@@ -527,6 +542,137 @@ app.delete("/api/accounts/:id", verifyUser, async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Gagal menghapus rekening"
+    });
+  }
+});
+
+// ===============================
+// KATALOG DAN LANGGANAN PAKET LAYANAN
+// ===============================
+
+app.get("/api/packages", verifyUser, (req, res) => {
+  res.json({
+    success: true,
+    packages: Object.values(PACKAGES)
+  });
+});
+
+app.get("/api/packages/mine", verifyUser, async (req, res) => {
+  try {
+    const snap = await db.collection("package_purchases")
+      .where("uid", "==", req.user.uid)
+      .limit(100)
+      .get();
+
+    res.json({
+      success: true,
+      packages: snap.docs.map(cleanDocument)
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: "Gagal mengambil paket pengguna"
+    });
+  }
+});
+
+// Pembelian paket hanya mencatat pembelian akses layanan.
+// Tidak ada kredit keuntungan atau pengembalian dana otomatis.
+app.post("/api/packages/purchase", verifyUser, async (req, res) => {
+  try {
+    const selected = PACKAGES[String(req.body.packageId || "")];
+
+    if (!selected) {
+      return res.status(400).json({
+        success: false,
+        message: "Paket tidak tersedia."
+      });
+    }
+
+    const walletRef = db.collection("wallets").doc(req.user.uid);
+    const purchaseRef = db.collection("package_purchases").doc();
+    const ledgerRef = db.collection("wallet_ledger").doc();
+
+    await db.runTransaction(async tx => {
+      const wallet = await tx.get(walletRef);
+      const balance = wallet.exists
+        ? Number(wallet.data().balance || 0)
+        : 0;
+
+      if (!Number.isSafeInteger(balance) || balance < selected.price) {
+        throw new Error("Saldo tidak mencukupi untuk membeli paket.");
+      }
+
+      const now = new Date();
+      const maturity = new Date(
+        now.getTime() + selected.durationDays * 86400000
+      );
+
+      tx.set(walletRef, {
+        balance: balance - selected.price,
+        updatedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      tx.set(purchaseRef, {
+        uid: req.user.uid,
+        packageId: selected.id,
+        packageName: selected.name,
+        purchaseAmount: selected.price,
+        durationDays: selected.durationDays,
+        status: "active",
+        purchasedAt: Timestamp.fromDate(now),
+        maturityAt: Timestamp.fromDate(maturity),
+        createdAt: FieldValue.serverTimestamp()
+      });
+
+      tx.set(ledgerRef, {
+        uid: req.user.uid,
+        type: "package_purchase",
+        amount: -selected.price,
+        referenceId: purchaseRef.id,
+        createdAt: FieldValue.serverTimestamp()
+      });
+    });
+
+    res.json({
+      success: true,
+      message: "Paket layanan berhasil dibeli dan masa akses sudah dimulai.",
+      purchaseId: purchaseRef.id
+    });
+  } catch (error) {
+    errorResponse(res, error, "Gagal membeli paket");
+  }
+});
+
+app.post("/api/support", verifyUser, async (req, res) => {
+  try {
+    const message = String(req.body.message || "").trim();
+
+    if (!message || message.length > 2000) {
+      return res.status(400).json({
+        success: false,
+        message: "Pesan wajib diisi dan maksimal 2.000 karakter."
+      });
+    }
+
+    await db.collection("support_messages").add({
+      uid: req.user.uid,
+      email: req.user.email || "",
+      message,
+      status: "open",
+      createdAt: FieldValue.serverTimestamp()
+    });
+
+    res.json({
+      success: true,
+      message: "Pesan bantuan berhasil dikirim."
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: "Gagal mengirim pesan bantuan."
     });
   }
 });
@@ -625,7 +771,7 @@ app.post("/api/admin/deposits/:id/approve",
         }
 
         const data = deposit.data();
-        const amount = Number(data.amount);
+                const amount = Number(data.amount);
 
         if (!Number.isSafeInteger(amount) || amount < 10000) {
           throw new Error("Nominal deposit tidak valid");
@@ -865,6 +1011,110 @@ app.post("/api/admin/withdrawals/:id/reject",
       });
     } catch (error) {
       errorResponse(res, error, "Gagal menolak penarikan");
+    }
+  }
+);
+
+// ===============================
+// ADMIN: PAKET LAYANAN YANG SUDAH BERAKHIR
+// Tidak ada pencairan hasil atau kredit keuntungan otomatis.
+// ===============================
+
+app.get("/api/admin/packages/due",
+  verifyUser, verifyAdmin, async (req, res) => {
+    try {
+      const snap = await db.collection("package_purchases")
+        .where("status", "==", "active")
+        .limit(200)
+        .get();
+
+      const due = snap.docs.filter(doc => {
+        const t = doc.data().maturityAt;
+        return t &&
+          typeof t.toMillis === "function" &&
+          t.toMillis() <= Date.now();
+      });
+
+      const packages = await Promise.all(due.map(async doc => {
+        const data = cleanDocument(doc);
+        const user = await db.collection("users").doc(data.uid).get();
+
+        return {
+          ...data,
+          userName: user.exists ? user.data().fullName || "" : "",
+          userEmail: user.exists ? user.data().email || "" : ""
+        };
+      }));
+
+      res.json({ success: true, packages });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({
+        success: false,
+        message: "Gagal mengambil paket yang berakhir."
+      });
+    }
+  }
+);
+
+app.post("/api/admin/packages/:id/settle",
+  verifyUser, verifyAdmin, async (req, res) => {
+    try {
+      const purchaseRef = db.collection("package_purchases")
+        .doc(req.params.id);
+
+      await db.runTransaction(async tx => {
+        const purchase = await tx.get(purchaseRef);
+
+        if (!purchase.exists || purchase.data().status !== "active") {
+          throw new Error("Paket tidak tersedia atau sudah diproses.");
+        }
+
+        const maturity = purchase.data().maturityAt;
+
+        if (
+          !maturity ||
+          typeof maturity.toMillis !== "function" ||
+          maturity.toMillis() > Date.now()
+        ) {
+          throw new Error("Masa akses paket belum berakhir.");
+        }
+
+        tx.update(purchaseRef, {
+          status: "expired",
+          expiredAt: FieldValue.serverTimestamp(),
+          reviewedBy: req.user.uid
+        });
+      });
+
+      res.json({
+        success: true,
+        message: "Masa akses paket ditandai berakhir. Tidak ada keuntungan yang dikreditkan."
+      });
+    } catch (error) {
+      errorResponse(res, error, "Gagal memperbarui status paket");
+    }
+  }
+);
+
+app.get("/api/admin/support",
+  verifyUser, verifyAdmin, async (req, res) => {
+    try {
+      const snap = await db.collection("support_messages")
+        .where("status", "==", "open")
+        .limit(100)
+        .get();
+
+      res.json({
+        success: true,
+        messages: snap.docs.map(cleanDocument)
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({
+        success: false,
+        message: "Gagal mengambil pesan bantuan."
+      });
     }
   }
 );
